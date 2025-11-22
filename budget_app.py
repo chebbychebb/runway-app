@@ -7,7 +7,7 @@ import altair as alt
 # --- CONFIG ---
 st.set_page_config(page_title="Runway", page_icon="💸", layout="centered")
 
-# --- AESTHETICS ---
+# --- AESTHETICS & CSS ---
 st.markdown("""
     <style>
         #MainMenu {visibility: hidden;}
@@ -22,7 +22,6 @@ st.markdown("""
         [data-testid="stMetricValue"] {
             font-size: 1.8rem;
         }
-        /* Custom Tags */
         .price-tag-neg { color: #ff4b4b; font-weight: bold; float: right; }
         .price-tag-pos { color: #00cc96; font-weight: bold; float: right; }
         .item-name { font-weight: 600; font-size: 1.1rem; }
@@ -58,7 +57,43 @@ def save_entry(item, category, amount):
     updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     conn.update(worksheet="Logs", data=updated_df)
 
-# --- CALCULATIONS ---
+# --- THE SMART BAR ENGINE (CUSTOM HTML) ---
+def render_smart_bar(current_balance, allowance):
+    # 1. THE GREEN SCENARIO (Bonus Money)
+    if current_balance > allowance:
+        surplus = current_balance - allowance
+        # Cap visual at 100% of allowance (solves the 10x problem)
+        fill_pct = min((surplus / allowance) * 100, 100)
+        color = "#00cc96" # Green
+        label = "🟢 BONUS BUFFER"
+    
+    # 2. THE RED SCENARIO (Debt)
+    elif current_balance < 0:
+        debt = abs(current_balance)
+        # Cap visual at 100% of allowance
+        fill_pct = min((debt / allowance) * 100, 100)
+        color = "#ff4b4b" # Red
+        label = "🔴 DEBT ALERT"
+        
+    # 3. THE BLUE SCENARIO (Standard Runway)
+    else:
+        # How much of the allowance is LEFT?
+        fill_pct = (current_balance / allowance) * 100
+        color = "#29b5e8" # Blue
+        label = "🔵 REMAINING ALLOWANCE"
+
+    # Render HTML Bar
+    st.markdown(f"""
+        <div style="margin-bottom: 5px; font-size: 0.8rem; color: #888;">{label}</div>
+        <div style="background-color: #333; border-radius: 10px; height: 25px; width: 100%;">
+            <div style="background-color: {color}; width: {fill_pct}%; height: 100%; border-radius: 10px; transition: width 0.5s;"></div>
+        </div>
+        <div style="text-align: right; font-size: 0.8rem; color: {color}; margin-top: 5px;">
+            {fill_pct:.1f}% Capacity
+        </div>
+    """, unsafe_allow_html=True)
+
+# --- MAIN LOGIC ---
 try:
     df = load_data()
 except Exception as e:
@@ -66,11 +101,10 @@ except Exception as e:
 
 today = datetime.date.today()
 
+# Metric Calculation
 if not df.empty:
-    # Filter for current month/year
     mask = (df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year)
     current_month_df = df.loc[mask]
-    # Net Spend = Sum of (Expenses[+] and Income[-])
     net_spend = current_month_df["Amount"].sum()
 else:
     net_spend = 0.0
@@ -78,15 +112,15 @@ else:
 
 current_balance = MONTHLY_ALLOWANCE - FIXED_COSTS - net_spend
 
+# Time Math
 if today.month == 12:
     next_month = datetime.date(today.year + 1, 1, 1)
 else:
     next_month = datetime.date(today.year, today.month + 1, 1)
-    
 days_remaining = (next_month - today).days
 daily_safe_spend = current_balance / days_remaining if days_remaining > 0 else 0
 
-# --- HEADER ---
+# --- DASHBOARD HEADER ---
 st.title("💸 The Runway")
 
 c1, c2, c3 = st.columns(3)
@@ -95,13 +129,11 @@ c2.metric("Days Left", f"{days_remaining} d")
 c3.metric("Daily Cap", f"{daily_safe_spend:.0f}", 
           delta_color="normal" if daily_safe_spend > 20 else "inverse")
 
-# PROGRESS BAR (Updated Logic: Uses Net Spend)
-budget_limit = MONTHLY_ALLOWANCE - FIXED_COSTS
-if budget_limit > 0:
-    # If net_spend is negative (you saved more than you started with), bar is 0
-    # If net_spend is high, bar fills up
-    burn_rate = max(0.0, min(net_spend / budget_limit, 1.0))
-    st.progress(burn_rate)
+st.divider()
+
+# --- INJECT SMART BAR ---
+# This replaces the old st.progress with our intelligent HTML bar
+render_smart_bar(current_balance, MONTHLY_ALLOWANCE)
 
 st.divider()
 
@@ -158,57 +190,69 @@ with mode_intel:
     st.header("🧐 Analysis")
     
     if not current_month_df.empty:
-        # 1. WEEKLY METRIC
         current_month_df['Week'] = current_month_df['Date'].dt.isocalendar().week
         this_week = today.isocalendar().week
-        # Sum only POSITIVE amounts (Spending) for the weekly tracker
         weekly_spend = current_month_df[
             (current_month_df['Week'] == this_week) & 
             (current_month_df['Amount'] > 0)
         ]['Amount'].sum()
         st.metric("Spent This Week", f"{weekly_spend:.0f} MAD")
 
-        # 2. COLORIZED BAR CHART (Altair)
         st.caption("Spending by Category")
-        # Filter for expenses only (>0)
         cat_data = current_month_df[current_month_df['Amount'] > 0].groupby('Category')['Amount'].sum().reset_index()
         
         chart = alt.Chart(cat_data).mark_bar().encode(
             x=alt.X('Category', sort='-y'),
             y='Amount',
-            color='Category', # <--- THIS ADDS THE COLORS
-            tooltip=['Category', 'Amount']
-        )
-        st.altair_chart(chart, use_container_width=True)
+            color=alt.Color('Category', legend=None), # Colorful chartsif I spent more than 1300 then I need to have the full blue bar filled then a red filling should appear after it showing that I got bankrupt.
+If I have more than 1300 then the bar should start with green and only start filling with blue when I finish spending the bonus and strat spending from 1300.
 
-        # 3. FULL HISTORY TABLE (With Sign Flip)
+but the bonus and bankrupcy bars shouldnt increase or decrease indefinitely. This would break the screen of the GUI. 
+if I spent more than 1300 then I need to have the full blue bar filled then a red filling should appear after it showing that I got bankrupt.
+If I have more than 1300 then the bar should start with green and only start filling with blue when I finish spending the bonus and strat spending from 1300.
+
+but the bonus and bankrupcy bars shouldnt increase or decrease indefinitely. This would break the screen of the GUI. 
+
+The graphical user interface should should a fixed bar length no matter what the user may haif I spent more than 1300 then I need to have the full blue bar filled then a red filling should appear after it showing that I got bankrupt.
+If I have more than 1300 then the bar should start with green and only start filling with blue when I finish spending the bonus and strat spending from 1300.
+
+but the bonus and bankrupcy bars shouldnt increase or decrease indefinitely. This would break the screen of the GUI. 
+
+The graphical user interface should should a fixed bar length no matter what the user may have as a bonus or may lose.ve as a bonus or may lose.
+The graphical user interface should should a fixed bar length no matter what the user may have as a bonus or may lose.
+            tooltip=['Category', 'Amount']
+        )if I spent more than 1300 then I need to have the full blue bar filled then a red filling should appear after it showing that I got bankrupt.
+If I have more than 1300 then the bar should start with green and only start filling with blue when I finish spending the bonus and strat spending from 1300.
+
+but the bonus and bankrupcy bars shouldnt increase or decrease indefinitely. This would break the screen of the GUI. 
+if I spent more than 1300 then I need to have the full blue bar filled then a red filling should appear after it showing that I got bankrupt.
+If I have more than 1300 then the bar should start with green and only start filling with blue when I finish spending the bonus and strat spending from 1300.
+
+but the bonus and bankrupcy bars shouldnt increase or decrease indefinitely. This would break the screen of the GUI. 
+
+The graphical user interface should should a fixed bar length no matter what the user may have as a bonus or may lose.
+The graphical user interface should should a fixed bar length no matter what the user may have as a bonus or may lose.
+        st.altair_chart(chart, use_container_width=True)
+if I spent more than 1300 then I need to have the full blue bar filled then a red filling should appear after it showing that I got bankrupt.
+If I have more than 1300 then the bar should start with green and only start filling with blue when I finish spending the bonus and strat spending from 1300.
+
+but the bonus and bankrupcy bars shouldnt increase or decrease indefinitely. This would break the screen of the GUI. 
+
+The graphical user interface should should a fixed bar length no matter what the user may have as a bonus or may lose.
         st.divider()
         with st.expander("📂 View Full History"):
-            # Prepare data for display
             display_df = df.copy().sort_values(by="Date", ascending=False)
-            
-            # LOGIC FLIP: 
-            # Database: Exp(+), Inc(-)
-            # Display: Exp(-), Inc(+)
             display_df['Amount'] = display_df['Amount'] * -1
             
-            # FORMATTING: Add + sign for positive numbers
             def format_currency(val):
-                if val > 0:
-                    return f"+{val:.0f} MAD"
-                else:
-                    return f"{val:.0f} MAD"
+                return f"+{val:.0f} MAD" if val > 0 else f"{val:.0f} MAD"
             
             display_df['Cost'] = display_df['Amount'].apply(format_currency)
-            
-            # Show specific columns
             st.dataframe(
                 display_df[['Date', 'Item', 'Category', 'Cost']],
                 use_container_width=True,
                 hide_index=True,
-                column_config={
-                    "Date": st.column_config.DateColumn("Date", format="MMM DD"),
-                }
+                column_config={"Date": st.column_config.DateColumn("Date", format="MMM DD")}
             )
     else:
         st.info("No data yet.")
