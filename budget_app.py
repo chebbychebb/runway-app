@@ -65,7 +65,7 @@ def save_entry(item, category, amount):
     updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     conn.update(worksheet="Logs", data=updated_df)
 
-# --- THE SMART BAR ENGINE ---
+# --- SMART BAR ENGINE ---
 def render_smart_bar(current_balance, total_monthly_budget):
     if current_balance > total_monthly_budget:
         surplus = current_balance - total_monthly_budget
@@ -117,14 +117,14 @@ if not df.empty:
 else:
     rollover = 0.0
 
-# 2. CURRENT MONTH CALCULATION
+# 2. CURRENT MONTH SPEND
 if not df.empty:
     current_mask = (df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year)
     current_month_spend = df.loc[current_mask, "Amount"].sum()
 else:
     current_month_spend = 0.0
 
-# 3. TOTALS
+# 3. BALANCES
 this_month_budget = (MONTHLY_ALLOWANCE - FIXED_COSTS) + rollover
 current_balance = this_month_budget - current_month_spend
 
@@ -135,12 +135,9 @@ else:
     next_month = datetime.date(today.year, today.month + 1, 1)
 days_remaining = (next_month - today).days
 
-# --- LOGIC UPDATE: DAILY CAP ---
+# Daily Cap
 if days_remaining > 0:
-    # First calculate the raw math
-    raw_daily = current_balance / days_remaining
-    # Then apply the "Floor" of 0.0. You can't have a negative daily cap.
-    daily_safe_spend = max(0.0, raw_daily)
+    daily_safe_spend = max(0.0, current_balance / days_remaining)
 else:
     daily_safe_spend = 0
 
@@ -172,6 +169,7 @@ st.divider()
 # --- TABS ---
 mode_action, mode_intel = st.tabs(["🚀 Action", "📊 Intel"])
 
+# === ACTION TAB ===
 with mode_action:
     with st.expander("➕ Add Transaction", expanded=True):
         tab_expense, tab_income = st.tabs(["Spend", "Earn"])
@@ -200,6 +198,7 @@ with mode_action:
 
     st.subheader("Recent Activity")
     if not df.empty:
+        # Show last 5 items from ENTIRE history
         recent = df.tail(5).iloc[::-1]
         for index, row in recent.iterrows():
             amt = row['Amount']
@@ -216,23 +215,39 @@ with mode_action:
                     <span class="price-tag-neg">-{amt:.0f} MAD</span>
                 </div>""", unsafe_allow_html=True)
 
+# === INTEL TAB (TIME MACHINE) ===
 with mode_intel:
     st.header("🧐 Analysis")
+    
     if not df.empty:
-        mask = (df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year)
-        current_month_df = df.loc[mask]
+        # 1. PREPARE TIME MACHINE
+        # Create a "Month-Year" column for sorting/filtering
+        df['Month_Year'] = df['Date'].dt.to_period('M')
         
-        if not current_month_df.empty:
-            current_month_df['Week'] = current_month_df['Date'].dt.isocalendar().week
-            this_week = today.isocalendar().week
-            weekly_spend = current_month_df[
-                (current_month_df['Week'] == this_week) & 
-                (current_month_df['Amount'] > 0)
-            ]['Amount'].sum()
-            st.metric("Spent This Week", f"{weekly_spend:.0f} MAD")
+        # Get unique months, sort descending (newest first)
+        available_months = df['Month_Year'].unique().astype(str)
+        available_months = sorted(available_months, reverse=True)
+        
+        # Dropdown to select period
+        selected_period = st.selectbox("📅 Select Time Period", available_months, index=0)
+        
+        # FILTER DATA BASED ON SELECTION
+        # We split the selected string "2025-11" back into year/month
+        sel_year, sel_month = map(int, selected_period.split('-'))
+        
+        # Create mask for the SELECTED month
+        intel_mask = (df['Date'].dt.month == sel_month) & (df['Date'].dt.year == sel_year)
+        intel_df = df.loc[intel_mask]
+        
+        if not intel_df.empty:
+            # --- CHARTS FOR SELECTED MONTH ---
+            
+            # Weekly Spend (Specific to that month)
+            total_selected_spend = intel_df[intel_df['Amount'] > 0]['Amount'].sum()
+            st.metric(f"Total Spent in {selected_period}", f"{total_selected_spend:.0f} MAD")
 
-            st.caption("Spending by Category (This Month)")
-            cat_data = current_month_df[current_month_df['Amount'] > 0].groupby('Category')['Amount'].sum().reset_index()
+            st.caption("Spending by Category")
+            cat_data = intel_df[intel_df['Amount'] > 0].groupby('Category')['Amount'].sum().reset_index()
             chart = alt.Chart(cat_data).mark_bar().encode(
                 x=alt.X('Category', sort='-y'),
                 y='Amount',
@@ -241,18 +256,21 @@ with mode_intel:
             )
             st.altair_chart(chart, use_container_width=True)
 
-        st.divider()
-        with st.expander("📂 View Full History"):
-            display_df = df.copy().sort_values(by="Date", ascending=False)
-            display_df['Amount'] = display_df['Amount'] * -1
-            def format_currency(val):
-                return f"+{val:.0f} MAD" if val > 0 else f"{val:.0f} MAD"
-            display_df['Cost'] = display_df['Amount'].apply(format_currency)
-            st.dataframe(
-                display_df[['Date', 'Item', 'Category', 'Cost']],
-                use_container_width=True,
-                hide_index=True,
-                column_config={"Date": st.column_config.DateColumn("Date", format="MMM DD")}
-            )
+            # --- FULL HISTORY (For Selected Month) ---
+            st.divider()
+            with st.expander(f"📂 View Details for {selected_period}", expanded=True):
+                display_df = intel_df.copy().sort_values(by="Date", ascending=False)
+                display_df['Amount'] = display_df['Amount'] * -1
+                def format_currency(val):
+                    return f"+{val:.0f} MAD" if val > 0 else f"{val:.0f} MAD"
+                display_df['Cost'] = display_df['Amount'].apply(format_currency)
+                st.dataframe(
+                    display_df[['Date', 'Item', 'Category', 'Cost']],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={"Date": st.column_config.DateColumn("Date", format="MMM DD")}
+                )
+        else:
+            st.info("No data found for this period.")
     else:
-        st.info("No data yet.")
+        st.info("Log some expenses to unlock Analysis.")
