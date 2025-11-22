@@ -25,6 +25,14 @@ st.markdown("""
         .price-tag-neg { color: #ff4b4b; font-weight: bold; float: right; }
         .price-tag-pos { color: #00cc96; font-weight: bold; float: right; }
         .item-name { font-weight: 600; font-size: 1.1rem; }
+        .rollover-box {
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #262730;
+            text-align: center;
+            margin-bottom: 20px;
+            border: 1px solid #444;
+        }
     </style>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -57,37 +65,37 @@ def save_entry(item, category, amount):
     updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     conn.update(worksheet="Logs", data=updated_df)
 
-# --- THE SMART BAR ENGINE (UPDATED LOGIC) ---
-def render_smart_bar(current_balance, allowance):
-    # 1. GREEN SCENARIO (Bonus)
-    if current_balance > allowance:
-        surplus = current_balance - allowance
-        # Bar fills based on how big the surplus is relative to a month salary
-        fill_pct = min((surplus / allowance) * 100, 100)
+# --- THE SMART BAR ENGINE ---
+def render_smart_bar(current_balance, total_monthly_budget):
+    # total_monthly_budget is (1300 + Rollover)
+    
+    # 1. GREEN SCENARIO (Bonus/Savings > Allowance)
+    if current_balance > total_monthly_budget:
+        surplus = current_balance - total_monthly_budget
+        fill_pct = 100
         color = "#00cc96" # Green
-        label = "🟢 BONUS BUFFER"
-        # Intelligent Alternative: Show exact amount
-        status_text = f"+{surplus:.0f} MAD Surplus"
+        label = "🟢 EXTRA SURPLUS"
+        status_text = f"+{surplus:.0f} MAD Above Budget"
     
     # 2. RED SCENARIO (Debt)
     elif current_balance < 0:
         debt = abs(current_balance)
-        # Bar fills based on severity of debt
-        fill_pct = min((debt / allowance) * 100, 100)
+        fill_pct = 100
         color = "#ff4b4b" # Red
         label = "🔴 DEBT ALERT"
-        # Intelligent Alternative: Show exact debt
-        status_text = f"-{debt:.0f} MAD Over Budget"
+        status_text = f"-{debt:.0f} MAD Overdrawn"
         
-    # 3. BLUE SCENARIO (Normal)
+    # 3. BLUE SCENARIO (Normal Spending)
     else:
-        fill_pct = (current_balance / allowance) * 100
+        # Percentage of the AVAILABLE budget
+        if total_monthly_budget > 0:
+            fill_pct = (current_balance / total_monthly_budget) * 100
+        else:
+            fill_pct = 0
         color = "#29b5e8" # Blue
-        label = "🔵 REMAINING ALLOWANCE"
-        # Keep Percentage for standard tracking
-        status_text = f"{fill_pct:.1f}% Fuel Remaining"
+        label = "🔵 CURRENT MONTH BUDGET"
+        status_text = f"{fill_pct:.1f}% Remaining"
 
-    # Render Bar
     st.markdown(f"""
         <div style="margin-bottom: 5px; font-size: 0.8rem; color: #888;">{label}</div>
         <div style="background-color: #333; border-radius: 10px; height: 25px; width: 100%;">
@@ -98,7 +106,7 @@ def render_smart_bar(current_balance, allowance):
         </div>
     """, unsafe_allow_html=True)
 
-# --- MAIN LOGIC ---
+# --- MAIN LOGIC (THE CFO UPGRADE) ---
 try:
     df = load_data()
 except Exception as e:
@@ -106,26 +114,64 @@ except Exception as e:
 
 today = datetime.date.today()
 
+# --- 1. CALCULATE ROLLOVER (PAST MONTHS) ---
 if not df.empty:
-    mask = (df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year)
-    current_month_df = df.loc[mask]
-    net_spend = current_month_df["Amount"].sum()
+    # Find start date (Earliest entry in DB)
+    start_date = df['Date'].min()
+    
+    # Calculate how many FULL past months have elapsed since start
+    # Example: Start Nov, Today Dec = 1 month passed.
+    months_passed = (today.year - start_date.year) * 12 + (today.month - start_date.month)
+    
+    # Filter: All transactions BEFORE this month
+    past_mask = (df['Date'] < pd.Timestamp(today.year, today.month, 1))
+    past_net_spend = df.loc[past_mask, "Amount"].sum()
+    
+    # Total Allowance given in the PAST (excluding this month)
+    past_total_allowance = months_passed * (MONTHLY_ALLOWANCE - FIXED_COSTS)
+    
+    # THE ROLLOVER: (Money we should have had) - (Money we spent)
+    rollover = past_total_allowance - past_net_spend
 else:
-    net_spend = 0.0
-    current_month_df = pd.DataFrame()
+    rollover = 0.0
 
-current_balance = MONTHLY_ALLOWANCE - FIXED_COSTS - net_spend
+# --- 2. CALCULATE CURRENT MONTH ---
+if not df.empty:
+    current_mask = (df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year)
+    current_month_spend = df.loc[current_mask, "Amount"].sum()
+else:
+    current_month_spend = 0.0
 
+# --- 3. THE GRAND TOTAL ---
+# Your budget for this month is 1300 + whatever you saved/lost before
+this_month_budget = (MONTHLY_ALLOWANCE - FIXED_COSTS) + rollover
+current_balance = this_month_budget - current_month_spend
+
+# Time Math
 if today.month == 12:
     next_month = datetime.date(today.year + 1, 1, 1)
 else:
     next_month = datetime.date(today.year, today.month + 1, 1)
-    
 days_remaining = (next_month - today).days
 daily_safe_spend = current_balance / days_remaining if days_remaining > 0 else 0
 
 # --- DASHBOARD HEADER ---
 st.title("💸 The Runway")
+
+# ROLLOVER INDICATOR (Only shows if significant)
+if abs(rollover) > 1:
+    if rollover > 0:
+        st.markdown(f"""
+        <div class="rollover-box" style="color: #00cc96;">
+            💰 <b>Savings Carried Over:</b> +{rollover:.0f} MAD added to this month.
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+        <div class="rollover-box" style="color: #ff4b4b;">
+            📉 <b>Debt Carried Over:</b> {rollover:.0f} MAD deducted from this month.
+        </div>
+        """, unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns(3)
 c1.metric("Balance", f"{current_balance:.0f}", delta=None)
@@ -135,8 +181,8 @@ c3.metric("Daily Cap", f"{daily_safe_spend:.0f}",
 
 st.divider()
 
-# Inject Smart Bar
-render_smart_bar(current_balance, MONTHLY_ALLOWANCE)
+# Inject Smart Bar (Using the adjusted budget)
+render_smart_bar(current_balance, this_month_budget)
 
 st.divider()
 
@@ -192,25 +238,30 @@ with mode_action:
 with mode_intel:
     st.header("🧐 Analysis")
     
-    if not current_month_df.empty:
-        current_month_df['Week'] = current_month_df['Date'].dt.isocalendar().week
-        this_week = today.isocalendar().week
-        weekly_spend = current_month_df[
-            (current_month_df['Week'] == this_week) & 
-            (current_month_df['Amount'] > 0)
-        ]['Amount'].sum()
-        st.metric("Spent This Week", f"{weekly_spend:.0f} MAD")
+    if not df.empty:
+        # Get current month data for chart
+        mask = (df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year)
+        current_month_df = df.loc[mask]
 
-        st.caption("Spending by Category")
-        cat_data = current_month_df[current_month_df['Amount'] > 0].groupby('Category')['Amount'].sum().reset_index()
-        
-        chart = alt.Chart(cat_data).mark_bar().encode(
-            x=alt.X('Category', sort='-y'),
-            y='Amount',
-            color=alt.Color('Category', legend=None),
-            tooltip=['Category', 'Amount']
-        )
-        st.altair_chart(chart, use_container_width=True)
+        if not current_month_df.empty:
+            current_month_df['Week'] = current_month_df['Date'].dt.isocalendar().week
+            this_week = today.isocalendar().week
+            weekly_spend = current_month_df[
+                (current_month_df['Week'] == this_week) & 
+                (current_month_df['Amount'] > 0)
+            ]['Amount'].sum()
+            st.metric("Spent This Week", f"{weekly_spend:.0f} MAD")
+
+            st.caption("Spending by Category (This Month)")
+            cat_data = current_month_df[current_month_df['Amount'] > 0].groupby('Category')['Amount'].sum().reset_index()
+            
+            chart = alt.Chart(cat_data).mark_bar().encode(
+                x=alt.X('Category', sort='-y'),
+                y='Amount',
+                color=alt.Color('Category', legend=None),
+                tooltip=['Category', 'Amount']
+            )
+            st.altair_chart(chart, use_container_width=True)
 
         st.divider()
         with st.expander("📂 View Full History"):
