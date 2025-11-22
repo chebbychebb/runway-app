@@ -35,35 +35,50 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 MONTHLY_ALLOWANCE = 1300.0  
 FIXED_COSTS = 0.0 
 
-# --- DATA ENGINE ---
+# --- ROBUST DATA ENGINE ---
 def load_data():
-    try:
-        df = conn.read(worksheet="Logs", ttl=0)
-        # Convert Date column to datetime objects so we can filter
-        if not df.empty:
-            df['Date'] = pd.to_datetime(df['Date'])
-        return df
-    except:
-        return pd.DataFrame(columns=["Date", "Item", "Category", "Amount"])
+    # We fetch the data without the try/except block first to see errors if they happen
+    # usecols ensures we don't read weird empty columns to the right
+    df = conn.read(worksheet="Logs", usecols=[0, 1, 2, 3], ttl=0)
+    
+    # 1. Drop completely empty rows (Google Sheets often has these at the bottom)
+    df = df.dropna(how='all')
+    
+    # 2. Handle Date Conversion Safely
+    if not df.empty:
+        # errors='coerce' turns bad dates into NaT (Not a Time) instead of crashing
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        # Drop rows where the date is invalid (cleanup)
+        df = df.dropna(subset=['Date'])
+        
+    return df
 
 def save_entry(item, category, amount):
     df = load_data()
+    
+    # Create new row
     new_row = pd.DataFrame({
         "Date": [datetime.date.today().strftime("%Y-%m-%d")],
         "Item": [item],
         "Category": [category],
         "Amount": [amount]
     })
-    # If df is empty, just use new_row, otherwise concat
-    if df.empty:
-        updated_df = new_row
-    else:
-        updated_df = pd.concat([df, new_row], ignore_index=True)
+    
+    # Concat
+    updated_df = pd.concat([df, new_row], ignore_index=True)
+    
+    # Ensure Date is string format before writing to prevent Google Sheets confusion
+    updated_df['Date'] = updated_df['Date'].dt.strftime('%Y-%m-%d')
     
     conn.update(worksheet="Logs", data=updated_df)
 
 # --- MAIN LOGIC ---
-df = load_data()
+try:
+    df = load_data()
+except Exception as e:
+    st.error(f"Data Error: {e}")
+    df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount"])
+
 today = datetime.date.today()
 
 if not df.empty:
@@ -140,14 +155,12 @@ with tab_earn:
                 st.balloons()
                 st.rerun()
 
-# --- HISTORY (Shows ALL history, not just this month, so you can scroll back) ---
+# --- HISTORY ---
 st.subheader("Recent Activity")
 if not df.empty:
-    # Show last 5 entries regardless of month
     recent = df.tail(5).iloc[::-1]
     for index, row in recent.iterrows():
         amount = row['Amount']
-        date_str = row['Date'].strftime("%b %d") # Format: Nov 22
         
         if amount < 0:
             st.info(f"💰 **+ {abs(amount)} MAD** | {row['Item']}")
