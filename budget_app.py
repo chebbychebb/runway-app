@@ -37,18 +37,15 @@ FIXED_COSTS = 0.0
 
 # --- ROBUST DATA ENGINE ---
 def load_data():
-    # We fetch the data without the try/except block first to see errors if they happen
-    # usecols ensures we don't read weird empty columns to the right
+    # Fetch data
     df = conn.read(worksheet="Logs", usecols=[0, 1, 2, 3], ttl=0)
     
-    # 1. Drop completely empty rows (Google Sheets often has these at the bottom)
+    # 1. Drop ghost rows
     df = df.dropna(how='all')
     
-    # 2. Handle Date Conversion Safely
+    # 2. Force Date Conversion
     if not df.empty:
-        # errors='coerce' turns bad dates into NaT (Not a Time) instead of crashing
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        # Drop rows where the date is invalid (cleanup)
         df = df.dropna(subset=['Date'])
         
     return df
@@ -67,7 +64,11 @@ def save_entry(item, category, amount):
     # Concat
     updated_df = pd.concat([df, new_row], ignore_index=True)
     
-    # Ensure Date is string format before writing to prevent Google Sheets confusion
+    # --- THE FIX IS HERE ---
+    # We force the entire column to be Datetime Objects first
+    updated_df['Date'] = pd.to_datetime(updated_df['Date'])
+    
+    # NOW we can safely format it back to String for Google Sheets
     updated_df['Date'] = updated_df['Date'].dt.strftime('%Y-%m-%d')
     
     conn.update(worksheet="Logs", data=updated_df)
@@ -76,17 +77,14 @@ def save_entry(item, category, amount):
 try:
     df = load_data()
 except Exception as e:
-    st.error(f"Data Error: {e}")
     df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount"])
 
 today = datetime.date.today()
 
 if not df.empty:
-    # FILTER: Only look at data from the CURRENT Month and Year
+    # FILTER: Current Month Only
     mask = (df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year)
     current_month_df = df.loc[mask]
-    
-    # Sum only this month's money
     net_spend = current_month_df["Amount"].sum()
 else:
     net_spend = 0.0
@@ -113,7 +111,7 @@ c2.metric("Days Left", f"{days_remaining} d")
 c3.metric("Daily Cap", f"{daily_safe_spend:.0f}", 
           delta_color="normal" if daily_safe_spend > 30 else "inverse")
 
-# Progress Bar logic
+# Progress Bar
 budget_limit = MONTHLY_ALLOWANCE - FIXED_COSTS
 if not current_month_df.empty:
     gross_spend = current_month_df[current_month_df['Amount'] > 0]['Amount'].sum()
@@ -161,7 +159,12 @@ if not df.empty:
     recent = df.tail(5).iloc[::-1]
     for index, row in recent.iterrows():
         amount = row['Amount']
-        
+        # Safely handle Date format for display
+        try:
+            date_str = row['Date'].strftime("%b %d")
+        except:
+            date_str = str(row['Date'])
+
         if amount < 0:
             st.info(f"💰 **+ {abs(amount)} MAD** | {row['Item']}")
         else:
