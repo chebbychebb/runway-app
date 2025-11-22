@@ -8,7 +8,6 @@ import altair as alt
 st.set_page_config(page_title="Runway", page_icon="💸", layout="centered")
 
 # --- AESTHETICS & CSS ---
-# The triple quotes below are crucial. Do not delete them.
 st.markdown("""
     <style>
         #MainMenu {visibility: hidden;}
@@ -58,27 +57,35 @@ def save_entry(item, category, amount):
     updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     conn.update(worksheet="Logs", data=updated_df)
 
-# --- THE SMART BAR ENGINE ---
+# --- THE SMART BAR ENGINE (UPDATED LOGIC) ---
 def render_smart_bar(current_balance, allowance):
     # 1. GREEN SCENARIO (Bonus)
     if current_balance > allowance:
         surplus = current_balance - allowance
+        # Bar fills based on how big the surplus is relative to a month salary
         fill_pct = min((surplus / allowance) * 100, 100)
         color = "#00cc96" # Green
         label = "🟢 BONUS BUFFER"
+        # Intelligent Alternative: Show exact amount
+        status_text = f"+{surplus:.0f} MAD Surplus"
     
     # 2. RED SCENARIO (Debt)
     elif current_balance < 0:
         debt = abs(current_balance)
+        # Bar fills based on severity of debt
         fill_pct = min((debt / allowance) * 100, 100)
         color = "#ff4b4b" # Red
         label = "🔴 DEBT ALERT"
+        # Intelligent Alternative: Show exact debt
+        status_text = f"-{debt:.0f} MAD Over Budget"
         
     # 3. BLUE SCENARIO (Normal)
     else:
         fill_pct = (current_balance / allowance) * 100
         color = "#29b5e8" # Blue
         label = "🔵 REMAINING ALLOWANCE"
+        # Keep Percentage for standard tracking
+        status_text = f"{fill_pct:.1f}% Fuel Remaining"
 
     # Render Bar
     st.markdown(f"""
@@ -86,8 +93,8 @@ def render_smart_bar(current_balance, allowance):
         <div style="background-color: #333; border-radius: 10px; height: 25px; width: 100%;">
             <div style="background-color: {color}; width: {fill_pct}%; height: 100%; border-radius: 10px; transition: width 0.5s;"></div>
         </div>
-        <div style="text-align: right; font-size: 0.8rem; color: {color}; margin-top: 5px;">
-            {fill_pct:.1f}% Capacity
+        <div style="text-align: right; font-size: 0.8rem; color: {color}; margin-top: 5px; font-weight: bold;">
+            {status_text}
         </div>
     """, unsafe_allow_html=True)
 
