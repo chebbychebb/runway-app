@@ -53,23 +53,22 @@ def load_data():
 def save_entry(item, category, amount):
     df = load_data()
     
-    # Create new row
+    # --- THE FIX IS HERE ---
+    # We create the date as a PANDAS TIMESTAMP (Time Object), not a String.
+    # This ensures it matches the format of the loaded data perfectly.
     new_row = pd.DataFrame({
-        "Date": [datetime.date.today().strftime("%Y-%m-%d")],
+        "Date": [pd.Timestamp(datetime.date.today())], 
         "Item": [item],
         "Category": [category],
         "Amount": [amount]
     })
     
-    # Concat
+    # Concat (Now safe because both are Time Objects)
     updated_df = pd.concat([df, new_row], ignore_index=True)
     
-    # --- THE FIX IS HERE ---
-    # We force the entire column to be Datetime Objects first
-    updated_df['Date'] = pd.to_datetime(updated_df['Date'])
-    
-    # NOW we can safely format it back to String for Google Sheets
-    updated_df['Date'] = updated_df['Date'].dt.strftime('%Y-%m-%d')
+    # Convert to String ONLY at the very end for Google Sheets storage
+    # We use a lambda function which is safer than .dt accessor for mixed scenarios
+    updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     
     conn.update(worksheet="Logs", data=updated_df)
 
