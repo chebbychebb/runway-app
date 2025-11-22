@@ -67,32 +67,24 @@ def save_entry(item, category, amount):
 
 # --- THE SMART BAR ENGINE ---
 def render_smart_bar(current_balance, total_monthly_budget):
-    # total_monthly_budget is (1300 + Rollover)
-    
-    # 1. GREEN SCENARIO (Bonus/Savings > Allowance)
     if current_balance > total_monthly_budget:
         surplus = current_balance - total_monthly_budget
         fill_pct = 100
-        color = "#00cc96" # Green
+        color = "#00cc96" 
         label = "🟢 EXTRA SURPLUS"
         status_text = f"+{surplus:.0f} MAD Above Budget"
-    
-    # 2. RED SCENARIO (Debt)
     elif current_balance < 0:
         debt = abs(current_balance)
         fill_pct = 100
-        color = "#ff4b4b" # Red
+        color = "#ff4b4b" 
         label = "🔴 DEBT ALERT"
         status_text = f"-{debt:.0f} MAD Overdrawn"
-        
-    # 3. BLUE SCENARIO (Normal Spending)
     else:
-        # Percentage of the AVAILABLE budget
         if total_monthly_budget > 0:
             fill_pct = (current_balance / total_monthly_budget) * 100
         else:
             fill_pct = 0
-        color = "#29b5e8" # Blue
+        color = "#29b5e8" 
         label = "🔵 CURRENT MONTH BUDGET"
         status_text = f"{fill_pct:.1f}% Remaining"
 
@@ -106,7 +98,7 @@ def render_smart_bar(current_balance, total_monthly_budget):
         </div>
     """, unsafe_allow_html=True)
 
-# --- MAIN LOGIC (THE CFO UPGRADE) ---
+# --- MAIN LOGIC ---
 try:
     df = load_data()
 except Exception as e:
@@ -114,36 +106,25 @@ except Exception as e:
 
 today = datetime.date.today()
 
-# --- 1. CALCULATE ROLLOVER (PAST MONTHS) ---
+# 1. ROLLOVER CALCULATION
 if not df.empty:
-    # Find start date (Earliest entry in DB)
     start_date = df['Date'].min()
-    
-    # Calculate how many FULL past months have elapsed since start
-    # Example: Start Nov, Today Dec = 1 month passed.
     months_passed = (today.year - start_date.year) * 12 + (today.month - start_date.month)
-    
-    # Filter: All transactions BEFORE this month
     past_mask = (df['Date'] < pd.Timestamp(today.year, today.month, 1))
     past_net_spend = df.loc[past_mask, "Amount"].sum()
-    
-    # Total Allowance given in the PAST (excluding this month)
     past_total_allowance = months_passed * (MONTHLY_ALLOWANCE - FIXED_COSTS)
-    
-    # THE ROLLOVER: (Money we should have had) - (Money we spent)
     rollover = past_total_allowance - past_net_spend
 else:
     rollover = 0.0
 
-# --- 2. CALCULATE CURRENT MONTH ---
+# 2. CURRENT MONTH CALCULATION
 if not df.empty:
     current_mask = (df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year)
     current_month_spend = df.loc[current_mask, "Amount"].sum()
 else:
     current_month_spend = 0.0
 
-# --- 3. THE GRAND TOTAL ---
-# Your budget for this month is 1300 + whatever you saved/lost before
+# 3. TOTALS
 this_month_budget = (MONTHLY_ALLOWANCE - FIXED_COSTS) + rollover
 current_balance = this_month_budget - current_month_spend
 
@@ -153,43 +134,44 @@ if today.month == 12:
 else:
     next_month = datetime.date(today.year, today.month + 1, 1)
 days_remaining = (next_month - today).days
-daily_safe_spend = current_balance / days_remaining if days_remaining > 0 else 0
 
-# --- DASHBOARD HEADER ---
+# --- LOGIC UPDATE: DAILY CAP ---
+if days_remaining > 0:
+    # First calculate the raw math
+    raw_daily = current_balance / days_remaining
+    # Then apply the "Floor" of 0.0. You can't have a negative daily cap.
+    daily_safe_spend = max(0.0, raw_daily)
+else:
+    daily_safe_spend = 0
+
+# --- DASHBOARD ---
 st.title("💸 The Runway")
 
-# ROLLOVER INDICATOR (Only shows if significant)
 if abs(rollover) > 1:
     if rollover > 0:
         st.markdown(f"""
         <div class="rollover-box" style="color: #00cc96;">
             💰 <b>Savings Carried Over:</b> +{rollover:.0f} MAD added to this month.
-        </div>
-        """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
     else:
         st.markdown(f"""
         <div class="rollover-box" style="color: #ff4b4b;">
             📉 <b>Debt Carried Over:</b> {rollover:.0f} MAD deducted from this month.
-        </div>
-        """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns(3)
 c1.metric("Balance", f"{current_balance:.0f}", delta=None)
 c2.metric("Days Left", f"{days_remaining} d")
 c3.metric("Daily Cap", f"{daily_safe_spend:.0f}", 
-          delta_color="normal" if daily_safe_spend > 20 else "inverse")
+          delta_color="normal" if daily_safe_spend > 0 else "inverse")
 
 st.divider()
-
-# Inject Smart Bar (Using the adjusted budget)
 render_smart_bar(current_balance, this_month_budget)
-
 st.divider()
 
 # --- TABS ---
 mode_action, mode_intel = st.tabs(["🚀 Action", "📊 Intel"])
 
-# === ACTION TAB ===
 with mode_action:
     with st.expander("➕ Add Transaction", expanded=True):
         tab_expense, tab_income = st.tabs(["Spend", "Earn"])
@@ -234,15 +216,12 @@ with mode_action:
                     <span class="price-tag-neg">-{amt:.0f} MAD</span>
                 </div>""", unsafe_allow_html=True)
 
-# === INTEL TAB ===
 with mode_intel:
     st.header("🧐 Analysis")
-    
     if not df.empty:
-        # Get current month data for chart
         mask = (df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year)
         current_month_df = df.loc[mask]
-
+        
         if not current_month_df.empty:
             current_month_df['Week'] = current_month_df['Date'].dt.isocalendar().week
             this_week = today.isocalendar().week
@@ -254,7 +233,6 @@ with mode_intel:
 
             st.caption("Spending by Category (This Month)")
             cat_data = current_month_df[current_month_df['Amount'] > 0].groupby('Category')['Amount'].sum().reset_index()
-            
             chart = alt.Chart(cat_data).mark_bar().encode(
                 x=alt.X('Category', sort='-y'),
                 y='Amount',
@@ -267,10 +245,8 @@ with mode_intel:
         with st.expander("📂 View Full History"):
             display_df = df.copy().sort_values(by="Date", ascending=False)
             display_df['Amount'] = display_df['Amount'] * -1
-            
             def format_currency(val):
                 return f"+{val:.0f} MAD" if val > 0 else f"{val:.0f} MAD"
-            
             display_df['Cost'] = display_df['Amount'].apply(format_currency)
             st.dataframe(
                 display_df[['Date', 'Item', 'Category', 'Cost']],
