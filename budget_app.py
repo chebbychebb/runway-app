@@ -2,12 +2,12 @@ import streamlit as st
 import pandas as pd
 import datetime
 from streamlit_gsheets import GSheetsConnection
-import altair as alt # For the charts
+import altair as alt
 
 # --- CONFIG ---
 st.set_page_config(page_title="Runway", page_icon="💸", layout="centered")
 
-# --- AESTHETICS & CSS ---
+# --- AESTHETICS ---
 st.markdown("""
     <style>
         #MainMenu {visibility: hidden;}
@@ -22,21 +22,10 @@ st.markdown("""
         [data-testid="stMetricValue"] {
             font-size: 1.8rem;
         }
-        /* Custom price tag styling */
-        .price-tag-neg {
-            color: #ff4b4b;
-            font-weight: bold;
-            float: right;
-        }
-        .price-tag-pos {
-            color: #00cc96;
-            font-weight: bold;
-            float: right;
-        }
-        .item-name {
-            font-weight: 600;
-            font-size: 1.1rem;
-        }
+        /* Custom Tags */
+        .price-tag-neg { color: #ff4b4b; font-weight: bold; float: right; }
+        .price-tag-pos { color: #00cc96; font-weight: bold; float: right; }
+        .item-name { font-weight: 600; font-size: 1.1rem; }
     </style>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -44,11 +33,11 @@ st.markdown("""
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- YOUR SETTINGS ---
+# --- SETTINGS ---
 MONTHLY_ALLOWANCE = 1300.0  
 FIXED_COSTS = 0.0 
 
-# --- ROBUST DATA ENGINE (DO NOT TOUCH) ---
+# --- DATA ENGINE ---
 def load_data():
     df = conn.read(worksheet="Logs", usecols=[0, 1, 2, 3], ttl=0)
     df = df.dropna(how='all')
@@ -59,7 +48,6 @@ def load_data():
 
 def save_entry(item, category, amount):
     df = load_data()
-    # Create Timestamp object to avoid data type conflicts
     new_row = pd.DataFrame({
         "Date": [pd.Timestamp(datetime.date.today())], 
         "Item": [item],
@@ -67,11 +55,10 @@ def save_entry(item, category, amount):
         "Amount": [amount]
     })
     updated_df = pd.concat([df, new_row], ignore_index=True)
-    # Convert to String for Google Sheets storage
     updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     conn.update(worksheet="Logs", data=updated_df)
 
-# --- MAIN LOGIC ---
+# --- CALCULATIONS ---
 try:
     df = load_data()
 except Exception as e:
@@ -79,10 +66,11 @@ except Exception as e:
 
 today = datetime.date.today()
 
-# 1. CALCULATE MONTHLY METRICS
 if not df.empty:
+    # Filter for current month/year
     mask = (df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year)
     current_month_df = df.loc[mask]
+    # Net Spend = Sum of (Expenses[+] and Income[-])
     net_spend = current_month_df["Amount"].sum()
 else:
     net_spend = 0.0
@@ -90,7 +78,6 @@ else:
 
 current_balance = MONTHLY_ALLOWANCE - FIXED_COSTS - net_spend
 
-# 2. CALCULATE TIME
 if today.month == 12:
     next_month = datetime.date(today.year + 1, 1, 1)
 else:
@@ -99,7 +86,7 @@ else:
 days_remaining = (next_month - today).days
 daily_safe_spend = current_balance / days_remaining if days_remaining > 0 else 0
 
-# --- THE DASHBOARD HEADER (Always Visible) ---
+# --- HEADER ---
 st.title("💸 The Runway")
 
 c1, c2, c3 = st.columns(3)
@@ -108,26 +95,21 @@ c2.metric("Days Left", f"{days_remaining} d")
 c3.metric("Daily Cap", f"{daily_safe_spend:.0f}", 
           delta_color="normal" if daily_safe_spend > 20 else "inverse")
 
-# Progress Bar
+# PROGRESS BAR (Updated Logic: Uses Net Spend)
 budget_limit = MONTHLY_ALLOWANCE - FIXED_COSTS
-if not current_month_df.empty:
-    # Only count positive spending for the bar (ignore income boosts)
-    gross_spend = current_month_df[current_month_df['Amount'] > 0]['Amount'].sum()
-else:
-    gross_spend = 0
-
 if budget_limit > 0:
-    burn_rate = min(gross_spend / budget_limit, 1.0)
+    # If net_spend is negative (you saved more than you started with), bar is 0
+    # If net_spend is high, bar fills up
+    burn_rate = max(0.0, min(net_spend / budget_limit, 1.0))
     st.progress(burn_rate)
 
 st.divider()
 
-# --- THE DUAL MODES ---
+# --- TABS ---
 mode_action, mode_intel = st.tabs(["🚀 Action", "📊 Intel"])
 
-# === TAB 1: ACTION (INPUTS & RECENT) ===
+# === ACTION TAB ===
 with mode_action:
-    # Input Form
     with st.expander("➕ Add Transaction", expanded=True):
         tab_expense, tab_income = st.tabs(["Spend", "Earn"])
         
@@ -140,7 +122,6 @@ with mode_action:
                 if st.form_submit_button("🔥 Burn It", type="primary"):
                     if amt > 0:
                         save_entry(item, cat, amt)
-                        st.success("Saved.")
                         st.rerun()
 
         with tab_income:
@@ -154,66 +135,80 @@ with mode_action:
                         st.balloons()
                         st.rerun()
 
-    # Recent Activity (Last 5 items)
     st.subheader("Recent Activity")
     if not df.empty:
         recent = df.tail(5).iloc[::-1]
         for index, row in recent.iterrows():
             amt = row['Amount']
             if amt < 0:
-                # Green for Income
                 st.markdown(f"""
                 <div style="padding: 10px; border-radius: 5px; background-color: #1E1E1E; margin-bottom: 5px;">
                     <span class="item-name">💰 {row['Item']}</span>
                     <span class="price-tag-pos">+{abs(amt):.0f} MAD</span>
-                </div>
-                """, unsafe_allow_html=True)
+                </div>""", unsafe_allow_html=True)
             else:
-                # Red for Expense
                 st.markdown(f"""
                 <div style="padding: 10px; border-radius: 5px; background-color: #1E1E1E; margin-bottom: 5px;">
                     <span class="item-name">{row['Item']}</span>
                     <span class="price-tag-neg">-{amt:.0f} MAD</span>
-                </div>
-                """, unsafe_allow_html=True)
+                </div>""", unsafe_allow_html=True)
 
-# === TAB 2: INTEL (CHARTS & DATA) ===
+# === INTEL TAB ===
 with mode_intel:
     st.header("🧐 Analysis")
     
     if not current_month_df.empty:
-        # 1. WEEKLY SPEND
-        # Calculate week number
+        # 1. WEEKLY METRIC
         current_month_df['Week'] = current_month_df['Date'].dt.isocalendar().week
         this_week = today.isocalendar().week
-        # Filter for this week
-        weekly_spend = current_month_df[current_month_df['Week'] == this_week]['Amount'].sum()
+        # Sum only POSITIVE amounts (Spending) for the weekly tracker
+        weekly_spend = current_month_df[
+            (current_month_df['Week'] == this_week) & 
+            (current_month_df['Amount'] > 0)
+        ]['Amount'].sum()
         st.metric("Spent This Week", f"{weekly_spend:.0f} MAD")
 
-        # 2. CATEGORY BREAKDOWN (Bar Chart)
-        st.caption("Where is the money going?")
-        # Group by category, sum amounts, sort descending
+        # 2. COLORIZED BAR CHART (Altair)
+        st.caption("Spending by Category")
+        # Filter for expenses only (>0)
         cat_data = current_month_df[current_month_df['Amount'] > 0].groupby('Category')['Amount'].sum().reset_index()
         
-        # Streamlit Native Bar Chart
-        st.bar_chart(cat_data.set_index("Category"))
+        chart = alt.Chart(cat_data).mark_bar().encode(
+            x=alt.X('Category', sort='-y'),
+            y='Amount',
+            color='Category', # <--- THIS ADDS THE COLORS
+            tooltip=['Category', 'Amount']
+        )
+        st.altair_chart(chart, use_container_width=True)
 
-        # 3. SPENDING TREND (Line Chart)
-        st.caption("Daily Burn Rate")
-        daily_data = current_month_df[current_month_df['Amount'] > 0].groupby('Date')['Amount'].sum()
-        st.line_chart(daily_data)
-
-        # 4. FULL HISTORY (The Data Archive)
+        # 3. FULL HISTORY TABLE (With Sign Flip)
         st.divider()
         with st.expander("📂 View Full History"):
-            # Show all data sorted by date
+            # Prepare data for display
+            display_df = df.copy().sort_values(by="Date", ascending=False)
+            
+            # LOGIC FLIP: 
+            # Database: Exp(+), Inc(-)
+            # Display: Exp(-), Inc(+)
+            display_df['Amount'] = display_df['Amount'] * -1
+            
+            # FORMATTING: Add + sign for positive numbers
+            def format_currency(val):
+                if val > 0:
+                    return f"+{val:.0f} MAD"
+                else:
+                    return f"{val:.0f} MAD"
+            
+            display_df['Cost'] = display_df['Amount'].apply(format_currency)
+            
+            # Show specific columns
             st.dataframe(
-                df.sort_values(by="Date", ascending=False),
+                display_df[['Date', 'Item', 'Category', 'Cost']],
                 use_container_width=True,
+                hide_index=True,
                 column_config={
                     "Date": st.column_config.DateColumn("Date", format="MMM DD"),
-                    "Amount": st.column_config.NumberColumn("Cost", format="%d MAD")
                 }
             )
     else:
-        st.info("No data for this month yet. Go spend some money!")
+        st.info("No data yet.")
