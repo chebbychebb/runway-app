@@ -10,9 +10,15 @@ st.set_page_config(page_title="PhD Survival Kit", page_icon="💸", layout="cent
 # --- AESTHETICS & CSS ---
 st.markdown("""
     <style>
+        /* Hides the 3-dots menu at top right */
         #MainMenu {visibility: hidden;}
+        
+        /* Hides the 'Made with Streamlit' footer */
         footer {visibility: hidden;}
-        header {visibility: hidden;}
+        
+        /* WE REMOVED THE LINE THAT HID THE HEADER */
+        /* This brings back the arrow button > so you can open the sidebar */
+        
         .block-container {
             padding-top: 1rem;
             padding-bottom: 5rem;
@@ -43,7 +49,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # --- SETTINGS ---
 MONTHLY_ALLOWANCE = 1300.0  
 FIXED_COSTS = 0.0 
-ADMIN_PASSWORD = "1234" # <--- CHANGE THIS IF YOU WANT SECRECY
+ADMIN_PASSWORD = "1234" 
 
 # --- DATA ENGINE ---
 def load_data():
@@ -66,23 +72,18 @@ def save_entry(item, category, amount):
     updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     conn.update(worksheet="Logs", data=updated_df)
 
-# --- RESET LOGIC (ADVANCED) ---
+# --- RESET LOGIC ---
 def reset_data(mode="all"):
     if mode == "all":
-        # Create empty dataframe with headers
         empty_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount"])
         conn.update(worksheet="Logs", data=empty_df)
     
     elif mode == "month":
-        # Keep everything EXCEPT current month
         df = load_data()
         if not df.empty:
             today = datetime.date.today()
-            # Invert mask: Keep rows where month/year DO NOT match today
             mask = ~((df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year))
             kept_df = df.loc[mask]
-            
-            # Ensure dates are strings before saving back
             kept_df['Date'] = kept_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
             conn.update(worksheet="Logs", data=kept_df)
 
@@ -202,7 +203,6 @@ if abs(rollover) > 1:
         </div>""", unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns(3)
-# ADDED MAD SUFFIX HERE
 c1.metric("Balance", f"{current_balance:.0f} MAD", delta=None)
 c2.metric("Days Left", f"{days_remaining} d")
 c3.metric("Daily Cap", f"{daily_safe_spend:.0f} MAD", 
