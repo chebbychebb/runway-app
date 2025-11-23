@@ -5,7 +5,7 @@ from streamlit_gsheets import GSheetsConnection
 import altair as alt
 
 # --- CONFIG ---
-st.set_page_config(page_title="Runway", page_icon="💸", layout="centered")
+st.set_page_config(page_title="PhD Survival Kit", page_icon="💸", layout="centered")
 
 # --- AESTHETICS & CSS ---
 st.markdown("""
@@ -43,6 +43,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # --- SETTINGS ---
 MONTHLY_ALLOWANCE = 1300.0  
 FIXED_COSTS = 0.0 
+ADMIN_PASSWORD = "1234" # <--- CHANGE THIS IF YOU WANT SECRECY
 
 # --- DATA ENGINE ---
 def load_data():
@@ -64,6 +65,26 @@ def save_entry(item, category, amount):
     updated_df = pd.concat([df, new_row], ignore_index=True)
     updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     conn.update(worksheet="Logs", data=updated_df)
+
+# --- RESET LOGIC (ADVANCED) ---
+def reset_data(mode="all"):
+    if mode == "all":
+        # Create empty dataframe with headers
+        empty_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount"])
+        conn.update(worksheet="Logs", data=empty_df)
+    
+    elif mode == "month":
+        # Keep everything EXCEPT current month
+        df = load_data()
+        if not df.empty:
+            today = datetime.date.today()
+            # Invert mask: Keep rows where month/year DO NOT match today
+            mask = ~((df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year))
+            kept_df = df.loc[mask]
+            
+            # Ensure dates are strings before saving back
+            kept_df['Date'] = kept_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
+            conn.update(worksheet="Logs", data=kept_df)
 
 # --- SMART BAR ENGINE ---
 def render_smart_bar(current_balance, total_monthly_budget):
@@ -106,7 +127,7 @@ except Exception as e:
 
 today = datetime.date.today()
 
-# 1. ROLLOVER CALCULATION
+# 1. ROLLOVER
 if not df.empty:
     start_date = df['Date'].min()
     months_passed = (today.year - start_date.year) * 12 + (today.month - start_date.month)
@@ -117,14 +138,14 @@ if not df.empty:
 else:
     rollover = 0.0
 
-# 2. CURRENT MONTH SPEND
+# 2. CURRENT MONTH
 if not df.empty:
     current_mask = (df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year)
     current_month_spend = df.loc[current_mask, "Amount"].sum()
 else:
     current_month_spend = 0.0
 
-# 3. BALANCES
+# 3. TOTALS
 this_month_budget = (MONTHLY_ALLOWANCE - FIXED_COSTS) + rollover
 current_balance = this_month_budget - current_month_spend
 
@@ -141,8 +162,32 @@ if days_remaining > 0:
 else:
     daily_safe_spend = 0
 
+# --- SIDEBAR (ADMIN PANEL) ---
+with st.sidebar:
+    st.header("⚙️ Admin Panel")
+    with st.expander("⚠️ Danger Zone"):
+        password_input = st.text_input("Admin Password", type="password")
+        
+        st.caption("Reset Current Month")
+        if st.button("🗑️ Wipe This Month"):
+            if password_input == ADMIN_PASSWORD:
+                reset_data(mode="month")
+                st.success("Month wiped.")
+                st.rerun()
+            else:
+                st.error("Wrong Password")
+        
+        st.caption("Factory Reset (Delete All)")
+        if st.button("☢️ RESET EVERYTHING"):
+            if password_input == ADMIN_PASSWORD:
+                reset_data(mode="all")
+                st.success("App Reset to Zero.")
+                st.rerun()
+            else:
+                st.error("Wrong Password")
+
 # --- DASHBOARD ---
-st.title("💸 The Runway")
+st.title("💸 PhD Survival Kit")
 
 if abs(rollover) > 1:
     if rollover > 0:
@@ -157,9 +202,10 @@ if abs(rollover) > 1:
         </div>""", unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Balance", f"{current_balance:.0f}", delta=None)
+# ADDED MAD SUFFIX HERE
+c1.metric("Balance", f"{current_balance:.0f} MAD", delta=None)
 c2.metric("Days Left", f"{days_remaining} d")
-c3.metric("Daily Cap", f"{daily_safe_spend:.0f}", 
+c3.metric("Daily Cap", f"{daily_safe_spend:.0f} MAD", 
           delta_color="normal" if daily_safe_spend > 0 else "inverse")
 
 st.divider()
@@ -169,7 +215,6 @@ st.divider()
 # --- TABS ---
 mode_action, mode_intel = st.tabs(["🚀 Action", "📊 Intel"])
 
-# === ACTION TAB ===
 with mode_action:
     with st.expander("➕ Add Transaction", expanded=True):
         tab_expense, tab_income = st.tabs(["Spend", "Earn"])
@@ -198,7 +243,6 @@ with mode_action:
 
     st.subheader("Recent Activity")
     if not df.empty:
-        # Show last 5 items from ENTIRE history
         recent = df.tail(5).iloc[::-1]
         for index, row in recent.iterrows():
             amt = row['Amount']
@@ -215,34 +259,21 @@ with mode_action:
                     <span class="price-tag-neg">-{amt:.0f} MAD</span>
                 </div>""", unsafe_allow_html=True)
 
-# === INTEL TAB (TIME MACHINE) ===
 with mode_intel:
     st.header("🧐 Analysis")
     
     if not df.empty:
-        # 1. PREPARE TIME MACHINE
-        # Create a "Month-Year" column for sorting/filtering
         df['Month_Year'] = df['Date'].dt.to_period('M')
-        
-        # Get unique months, sort descending (newest first)
         available_months = df['Month_Year'].unique().astype(str)
         available_months = sorted(available_months, reverse=True)
         
-        # Dropdown to select period
         selected_period = st.selectbox("📅 Select Time Period", available_months, index=0)
-        
-        # FILTER DATA BASED ON SELECTION
-        # We split the selected string "2025-11" back into year/month
         sel_year, sel_month = map(int, selected_period.split('-'))
         
-        # Create mask for the SELECTED month
         intel_mask = (df['Date'].dt.month == sel_month) & (df['Date'].dt.year == sel_year)
         intel_df = df.loc[intel_mask]
         
         if not intel_df.empty:
-            # --- CHARTS FOR SELECTED MONTH ---
-            
-            # Weekly Spend (Specific to that month)
             total_selected_spend = intel_df[intel_df['Amount'] > 0]['Amount'].sum()
             st.metric(f"Total Spent in {selected_period}", f"{total_selected_spend:.0f} MAD")
 
@@ -256,7 +287,6 @@ with mode_intel:
             )
             st.altair_chart(chart, use_container_width=True)
 
-            # --- FULL HISTORY (For Selected Month) ---
             st.divider()
             with st.expander(f"📂 View Details for {selected_period}", expanded=True):
                 display_df = intel_df.copy().sort_values(by="Date", ascending=False)
