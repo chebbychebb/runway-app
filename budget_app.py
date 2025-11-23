@@ -10,36 +10,21 @@ st.set_page_config(page_title="PhD Survival Kit", page_icon="💸", layout="cent
 # --- AESTHETICS & CSS ---
 st.markdown("""
     <style>
-        /* 1. HIDE ALL STREAMLIT UI ELEMENTS */
-        footer {visibility: hidden;}
-        [data-testid="stDecoration"] {display: none;}
-        .stDeployButton {display: none;}
-        [data-testid="stToolbar"] {display: none;}
+        /* Hides the 3-dots menu at top right */
+        #MainMenu {visibility: hidden;}
         
-        /* 2. NUCLEAR FIX FOR SIDEBAR ARROW > */
-        /* This forces the button to exist in the top left, regardless of header visibility */
-        [data-testid="stSidebarCollapsedControl"] {
-            display: block !important;
-            visibility: visible !important;
-            position: fixed !important;
-            top: 10px !important;
-            left: 10px !important;
-            z-index: 99999 !important;
-            color: #808495 !important; /* Visible Grey */
-            background-color: rgba(255, 255, 255, 0.1); /* Subtle background */
-            padding: 5px;
-            border-radius: 5px;
-        }
-
-        /* 3. ADJUST PADDING TO ACCOUNT FOR THE FLOATING BUTTON */
+        /* Hides the 'Made with Streamlit' footer */
+        footer {visibility: hidden;}
+        
+        /* WE REMOVED THE LINE THAT HID THE HEADER */
+        /* This brings back the arrow button > so you can open the sidebar */
+        
         .block-container {
-            padding-top: 3rem; 
+            padding-top: 1rem;
             padding-bottom: 5rem;
             padding-left: 1rem;
             padding-right: 1rem;
         }
-        
-        /* 4. TYPOGRAPHY */
         [data-testid="stMetricValue"] {
             font-size: 1.8rem;
         }
