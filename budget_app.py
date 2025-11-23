@@ -10,21 +10,36 @@ st.set_page_config(page_title="PhD Survival Kit", page_icon="💸", layout="cent
 # --- AESTHETICS & CSS ---
 st.markdown("""
     <style>
-        /* Hides the 3-dots menu at top right */
-        #MainMenu {visibility: hidden;}
+        /* 1. HIDE THE TOP RIGHT MENU (Fork, Deploy, 3 Dots) */
+        [data-testid="stToolbar"] {
+            visibility: hidden;
+            height: 0%;
+        }
         
-        /* Hides the 'Made with Streamlit' footer */
-        footer {visibility: hidden;}
-        
-        /* WE REMOVED THE LINE THAT HID THE HEADER */
-        /* This brings back the arrow button > so you can open the sidebar */
-        
+        /* 2. HIDE THE DEPLOY BUTTON SPECIFICALLY */
+        .stDeployButton {
+            visibility: hidden;
+        }
+
+        /* 3. HIDE THE COLORED LINE AT THE TOP */
+        [data-testid="stDecoration"] {
+            visibility: hidden;
+        }
+
+        /* 4. HIDE FOOTER */
+        footer {
+            visibility: hidden;
+        }
+
+        /* 5. ADJUST PADDING (Mobile Friendly) */
         .block-container {
             padding-top: 1rem;
             padding-bottom: 5rem;
             padding-left: 1rem;
             padding-right: 1rem;
         }
+        
+        /* 6. TYPOGRAPHY & ELEMENTS */
         [data-testid="stMetricValue"] {
             font-size: 1.8rem;
         }
