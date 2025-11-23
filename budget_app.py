@@ -10,36 +10,34 @@ st.set_page_config(page_title="PhD Survival Kit", page_icon="💸", layout="cent
 # --- AESTHETICS & CSS ---
 st.markdown("""
     <style>
-        /* 1. HIDE THE TOP RIGHT MENU (Fork, Deploy, 3 Dots) */
-        [data-testid="stToolbar"] {
-            visibility: hidden;
-            height: 0%;
+        /* 1. HIDE FOOTER & DECORATION */
+        footer {visibility: hidden;}
+        [data-testid="stDecoration"] {display: none;}
+        
+        /* 2. HIDE THE TOP RIGHT MENU & DEPLOY BUTTON */
+        .stDeployButton {display: none;}
+        [data-testid="stToolbar"] {visibility: hidden;}
+        
+        /* 3. THE FIX: FORCE THE SIDEBAR ARROW TO BE VISIBLE */
+        [data-testid="stSidebarCollapsedControl"] {
+            visibility: visible !important;
+            display: block !important;
+            color: white !important;
         }
         
-        /* 2. HIDE THE DEPLOY BUTTON SPECIFICALLY */
-        .stDeployButton {
-            visibility: hidden;
+        /* 4. HIDE THE HEADER BACKGROUND, BUT KEEP CONTAINER FOR THE ARROW */
+        header {
+            background-color: transparent !important;
         }
 
-        /* 3. HIDE THE COLORED LINE AT THE TOP */
-        [data-testid="stDecoration"] {
-            visibility: hidden;
-        }
-
-        /* 4. HIDE FOOTER */
-        footer {
-            visibility: hidden;
-        }
-
-        /* 5. ADJUST PADDING (Mobile Friendly) */
+        /* 5. ADJUST PADDING */
         .block-container {
-            padding-top: 1rem;
+            padding-top: 2rem; /* Give the arrow some breathing room */
             padding-bottom: 5rem;
             padding-left: 1rem;
             padding-right: 1rem;
         }
         
-        /* 6. TYPOGRAPHY & ELEMENTS */
         [data-testid="stMetricValue"] {
             font-size: 1.8rem;
         }
