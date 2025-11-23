@@ -10,34 +10,36 @@ st.set_page_config(page_title="PhD Survival Kit", page_icon="💸", layout="cent
 # --- AESTHETICS & CSS ---
 st.markdown("""
     <style>
-        /* 1. HIDE FOOTER & DECORATION */
+        /* 1. HIDE ALL STREAMLIT UI ELEMENTS */
         footer {visibility: hidden;}
         [data-testid="stDecoration"] {display: none;}
-        
-        /* 2. HIDE THE TOP RIGHT MENU & DEPLOY BUTTON */
         .stDeployButton {display: none;}
-        [data-testid="stToolbar"] {visibility: hidden;}
+        [data-testid="stToolbar"] {display: none;}
         
-        /* 3. THE FIX: FORCE THE SIDEBAR ARROW TO BE VISIBLE */
+        /* 2. NUCLEAR FIX FOR SIDEBAR ARROW > */
+        /* This forces the button to exist in the top left, regardless of header visibility */
         [data-testid="stSidebarCollapsedControl"] {
-            visibility: visible !important;
             display: block !important;
-            color: white !important;
-        }
-        
-        /* 4. HIDE THE HEADER BACKGROUND, BUT KEEP CONTAINER FOR THE ARROW */
-        header {
-            background-color: transparent !important;
+            visibility: visible !important;
+            position: fixed !important;
+            top: 10px !important;
+            left: 10px !important;
+            z-index: 99999 !important;
+            color: #808495 !important; /* Visible Grey */
+            background-color: rgba(255, 255, 255, 0.1); /* Subtle background */
+            padding: 5px;
+            border-radius: 5px;
         }
 
-        /* 5. ADJUST PADDING */
+        /* 3. ADJUST PADDING TO ACCOUNT FOR THE FLOATING BUTTON */
         .block-container {
-            padding-top: 2rem; /* Give the arrow some breathing room */
+            padding-top: 3rem; 
             padding-bottom: 5rem;
             padding-left: 1rem;
             padding-right: 1rem;
         }
         
+        /* 4. TYPOGRAPHY */
         [data-testid="stMetricValue"] {
             font-size: 1.8rem;
         }
