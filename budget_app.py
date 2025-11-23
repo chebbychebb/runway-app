@@ -7,24 +7,20 @@ import altair as alt
 # --- CONFIG ---
 st.set_page_config(page_title="PhD Survival Kit", page_icon="💸", layout="centered")
 
-# --- AESTHETICS & CSS ---
+# --- AESTHETICS & CSS (Safe Version) ---
 st.markdown("""
     <style>
-        /* Hides the 3-dots menu at top right */
-        #MainMenu {visibility: hidden;}
-        
         /* Hides the 'Made with Streamlit' footer */
         footer {visibility: hidden;}
         
-        /* WE REMOVED THE LINE THAT HID THE HEADER */
-        /* This brings back the arrow button > so you can open the sidebar */
-        
+        /* Standard padding */
         .block-container {
             padding-top: 1rem;
             padding-bottom: 5rem;
             padding-left: 1rem;
             padding-right: 1rem;
         }
+        
         [data-testid="stMetricValue"] {
             font-size: 1.8rem;
         }
@@ -46,8 +42,9 @@ st.markdown("""
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- SETTINGS ---
-MONTHLY_ALLOWANCE = 1300.0  
+# --- DEFAULTS ---
+# If no custom allowance is found in the DB, use this:
+DEFAULT_ALLOWANCE = 1300.0  
 FIXED_COSTS = 0.0 
 ADMIN_PASSWORD = "1234" 
 
@@ -122,13 +119,31 @@ def render_smart_bar(current_balance, total_monthly_budget):
 
 # --- MAIN LOGIC ---
 try:
-    df = load_data()
+    full_df = load_data()
 except Exception as e:
+    full_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount"])
+
+# 1. SPLIT DATA: REAL TRANSACTIONS vs ADMIN SETTINGS
+if not full_df.empty:
+    # Filter out the "ADMIN" category rows (These are setting updates, not spending)
+    df = full_df[full_df['Category'] != 'ADMIN'].copy()
+    
+    # Look for the latest Allowance Update
+    admin_df = full_df[full_df['Category'] == 'ADMIN']
+    if not admin_df.empty:
+        # Get the very last entry
+        last_admin_row = admin_df.iloc[-1]
+        # We assume the 'Amount' column holds the new allowance value
+        MONTHLY_ALLOWANCE = float(last_admin_row['Amount'])
+    else:
+        MONTHLY_ALLOWANCE = DEFAULT_ALLOWANCE
+else:
     df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount"])
+    MONTHLY_ALLOWANCE = DEFAULT_ALLOWANCE
 
 today = datetime.date.today()
 
-# 1. ROLLOVER
+# 2. ROLLOVER
 if not df.empty:
     start_date = df['Date'].min()
     months_passed = (today.year - start_date.year) * 12 + (today.month - start_date.month)
@@ -139,14 +154,14 @@ if not df.empty:
 else:
     rollover = 0.0
 
-# 2. CURRENT MONTH
+# 3. CURRENT MONTH
 if not df.empty:
     current_mask = (df['Date'].dt.month == today.month) & (df['Date'].dt.year == today.year)
     current_month_spend = df.loc[current_mask, "Amount"].sum()
 else:
     current_month_spend = 0.0
 
-# 3. TOTALS
+# 4. TOTALS
 this_month_budget = (MONTHLY_ALLOWANCE - FIXED_COSTS) + rollover
 current_balance = this_month_budget - current_month_spend
 
@@ -166,12 +181,28 @@ else:
 # --- SIDEBAR (ADMIN PANEL) ---
 with st.sidebar:
     st.header("⚙️ Admin Panel")
+    
+    # ALLOWANCE SETTING
+    with st.expander("💰 Edit Allowance"):
+        new_allowance = st.number_input("New Monthly Limit", value=MONTHLY_ALLOWANCE, step=100.0)
+        password_allowance = st.text_input("Password", type="password", key="pw_allowance")
+        
+        if st.button("Update Allowance"):
+            if password_allowance == ADMIN_PASSWORD:
+                # Save as a hidden "ADMIN" row
+                save_entry("Allowance Update", "ADMIN", new_allowance)
+                st.success(f"Allowance changed to {new_allowance}")
+                st.rerun()
+            else:
+                st.error("Wrong Password")
+
+    # DANGER ZONE
     with st.expander("⚠️ Danger Zone"):
-        password_input = st.text_input("Admin Password", type="password")
+        password_reset = st.text_input("Password", type="password", key="pw_reset")
         
         st.caption("Reset Current Month")
         if st.button("🗑️ Wipe This Month"):
-            if password_input == ADMIN_PASSWORD:
+            if password_reset == ADMIN_PASSWORD:
                 reset_data(mode="month")
                 st.success("Month wiped.")
                 st.rerun()
@@ -180,7 +211,7 @@ with st.sidebar:
         
         st.caption("Factory Reset (Delete All)")
         if st.button("☢️ RESET EVERYTHING"):
-            if password_input == ADMIN_PASSWORD:
+            if password_reset == ADMIN_PASSWORD:
                 reset_data(mode="all")
                 st.success("App Reset to Zero.")
                 st.rerun()
@@ -190,6 +221,7 @@ with st.sidebar:
 # --- DASHBOARD ---
 st.title("💸 PhD Survival Kit")
 
+# Show Rollover
 if abs(rollover) > 1:
     if rollover > 0:
         st.markdown(f"""
@@ -243,6 +275,7 @@ with mode_action:
 
     st.subheader("Recent Activity")
     if not df.empty:
+        # df already excludes ADMIN rows, so this is safe
         recent = df.tail(5).iloc[::-1]
         for index, row in recent.iterrows():
             amt = row['Amount']
