@@ -11,13 +11,17 @@ st.set_page_config(page_title="PhD Survival Kit", page_icon="💸", layout="cent
 # --- AESTHETICS & CSS (Safe Version) ---
 st.markdown("""
     <style>
+        /* Hides the 'Made with Streamlit' footer */
         footer {visibility: hidden;}
+        
+        /* Standard padding */
         .block-container {
             padding-top: 1rem;
             padding-bottom: 5rem;
             padding-left: 1rem;
             padding-right: 1rem;
         }
+        
         [data-testid="stMetricValue"] {
             font-size: 1.8rem;
         }
@@ -56,8 +60,8 @@ def load_data():
     return df
 
 def save_entry(item, category, amount):
-    # Generate unique ID for deletion
-    unique_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+    # Generate unique ID for deletion (Shorter format: YYYYMMDDHHMMSS)
+    unique_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     
     df = load_data()
     new_row = pd.DataFrame({
@@ -65,13 +69,13 @@ def save_entry(item, category, amount):
         "Item": [item],
         "Category": [category],
         "Amount": [amount],
-        "ID": [unique_id] # NEW: Save the unique ID
+        "ID": [unique_id] # Save the unique ID
     })
     updated_df = pd.concat([df, new_row], ignore_index=True)
     updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     conn.update(worksheet="Logs", data=updated_df)
 
-# --- NEW: DELETE LOGIC ---
+# --- DELETE LOGIC ---
 def delete_entry(entry_id):
     df = load_data()
     # Filter out the row with the matching ID
@@ -102,20 +106,20 @@ def reset_data(mode="all"):
             kept_df['Date'] = kept_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
             conn.update(worksheet="Logs", data=kept_df)
 
-# --- SMART BAR ENGINE (No changes needed) ---
+# --- SMART BAR ENGINE ---
 def render_smart_bar(current_balance, total_monthly_budget):
     if current_balance > total_monthly_budget:
         surplus = current_balance - total_monthly_budget
         fill_pct = 100
         color = "#00cc96" 
         label = "🟢 EXTRA SURPLUS"
-        status_text = f"+{surplus:.2f} MAD Above Budget" # Decimal change
+        status_text = f"+{surplus:.2f} MAD Above Budget" 
     elif current_balance < 0:
         debt = abs(current_balance)
         fill_pct = 100
         color = "#ff4b4b" 
         label = "🔴 DEBT ALERT"
-        status_text = f"-{debt:.2f} MAD Overdrawn" # Decimal change
+        status_text = f"-{debt:.2f} MAD Overdrawn"
     else:
         if total_monthly_budget > 0:
             fill_pct = (current_balance / total_monthly_budget) * 100
@@ -139,6 +143,7 @@ def render_smart_bar(current_balance, total_monthly_budget):
 try:
     full_df = load_data()
 except Exception as e:
+    # If loading fails (e.g., initial blank sheet), ensure DF has 5 columns
     full_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
 
 # 1. SPLIT DATA
@@ -197,8 +202,7 @@ with st.sidebar:
     
     # ALLOWANCE SETTING
     with st.expander("💰 Edit Allowance"):
-        # Set value to current allowance (uses global MONTHLY_ALLOWANCE)
-        new_allowance = st.number_input("New Monthly Limit", value=MONTHLY_ALLOWANCE, step=100.0)
+        new_allowance = st.number_input("New Monthly Limit", value=MONTHLY_ALLOWANCE, step=0.01) # Decimal input
         password_allowance = st.text_input("Password", type="password", key="pw_allowance")
         
         if st.button("Update Allowance"):
@@ -263,7 +267,6 @@ if abs(rollover) > 1:
         </div>""", unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns(3)
-# Decimals added: :.2f
 c1.metric("Balance", f"{current_balance:.2f} MAD", delta=None)
 c2.metric("Days Left", f"{days_remaining} d")
 c3.metric("Daily Cap", f"{daily_safe_spend:.2f} MAD", 
@@ -310,22 +313,22 @@ with mode_action:
         
         for index, row in recent.iterrows():
             amt = row['Amount']
-            # Truncate ID for display
-            display_id = str(row['ID'])[:6]
+            # Get the last 6 digits (HHMMSS) of the ID for quick reference
+            display_id = str(row['ID'])[-6:] 
             
             if amt < 0:
                 st.markdown(f"""
                 <div style="padding: 10px; border-radius: 5px; background-color: #1E1E1E; margin-bottom: 5px;">
                     <span class="item-name">💰 {row['Item']}</span>
                     <span class="price-tag-pos">+ {abs(amt):.2f} MAD</span>
-                    <p style='font-size: 0.75rem; color: #888; margin: 0;'>ID: {display_id}...</p>
+                    <p style='font-size: 0.75rem; color: #888; margin: 0;'>ID: {display_id} (Full ID: {str(row['ID'])[:6]}...)</p>
                 </div>""", unsafe_allow_html=True)
             else:
                 st.markdown(f"""
                 <div style="padding: 10px; border-radius: 5px; background-color: #1E1E1E; margin-bottom: 5px;">
                     <span class="item-name">{row['Item']}</span>
                     <span class="price-tag-neg">- {amt:.2f} MAD</span>
-                    <p style='font-size: 0.75rem; color: #888; margin: 0;'>ID: {display_id}...</p>
+                    <p style='font-size: 0.75rem; color: #888; margin: 0;'>ID: {display_id} (Full ID: {str(row['ID'])[:6]}...)</p>
                 </div>""", unsafe_allow_html=True)
 
 with mode_intel:
@@ -362,7 +365,6 @@ with mode_intel:
                 display_df['Amount'] = display_df['Amount'] * -1
                 def format_currency(val):
                     return f"+{val:.2f} MAD" if val > 0 else f"{val:.2f} MAD"
-                display_df['Cost'] = display_df['Amount'].apply(format_currency)
                 st.dataframe(
                     display_df[['Date', 'Item', 'Category', 'Cost', 'ID']],
                     use_container_width=True,
