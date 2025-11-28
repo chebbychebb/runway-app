@@ -335,6 +335,7 @@ with mode_action:
                     <p style='font-size: 0.75rem; color: #888; margin: 0;'>ID: {display_id} (Full ID: {str(row['ID'])[:6]}...)</p>
                 </div>""", unsafe_allow_html=True)
 
+# === INTEL TAB (TIME MACHINE) ===
 with mode_intel:
     st.header("🧐 Analysis")
     
@@ -350,6 +351,11 @@ with mode_intel:
         intel_df = df.loc[intel_mask]
         
         if not intel_df.empty:
+            
+            # --- START OF FIX: Ensure Amount is numeric before plotting/calculating ---
+            intel_df['Amount'] = pd.to_numeric(intel_df['Amount'], errors='coerce')
+            intel_df = intel_df.dropna(subset=['Amount'])
+            
             total_selected_spend = intel_df[intel_df['Amount'] > 0]['Amount'].sum()
             st.metric(f"Total Spent in {selected_period}", f"{total_selected_spend:.2f} MAD")
 
@@ -365,10 +371,22 @@ with mode_intel:
 
             st.divider()
             with st.expander(f"📂 View Details for {selected_period}", expanded=True):
+                
+                # --- FIX 2: CREATE COST COLUMN SAFELY ---
                 display_df = intel_df.copy().sort_values(by="Date", ascending=False)
-                display_df['Amount'] = display_df['Amount'] * -1
-                def format_currency(val):
-                    return f"+{val:.2f} MAD" if val > 0 else f"{val:.2f} MAD"
+                
+                # Flip the sign for display: Exp(+) -> Exp(-) ; Inc(-) -> Inc(+)
+                display_df['Display_Amount'] = display_df['Amount'] * -1
+                
+                # Define function inside the scope (standard Python practice)
+                def format_currency_for_display(val):
+                    # Val is the display-flipped amount
+                    return f"+{val:.2f} MAD" if val >= 0 else f"{val:.2f} MAD"
+                
+                # Create the 'Cost' column using the function on the flipped amount
+                display_df['Cost'] = display_df['Display_Amount'].apply(format_currency_for_display)
+                
+                # FINAL SELECTION (Should no longer fail on Cost or ID)
                 st.dataframe(
                     display_df[['Date', 'Item', 'Category', 'Cost', 'ID']],
                     use_container_width=True,
