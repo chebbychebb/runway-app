@@ -145,7 +145,11 @@ try:
 except Exception as e:
     # If loading fails (e.g., initial blank sheet), ensure DF has 5 columns
     full_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
-
+# DIAGNOSTIC CODE: Check what Pandas actually read
+if not full_df.empty:
+    st.sidebar.warning("DEBUG: Loaded Columns")
+    st.sidebar.write(full_df.columns.tolist())
+    st.sidebar.write(f"Sheet Size: {len(full_df)} rows")
 # 1. SPLIT DATA
 if not full_df.empty:
     df = full_df[full_df['Category'] != 'ADMIN'].copy()
