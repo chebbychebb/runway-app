@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import datetime
+import time # Needed for ID generation
 from streamlit_gsheets import GSheetsConnection
 import altair as alt
 
@@ -10,17 +11,13 @@ st.set_page_config(page_title="PhD Survival Kit", page_icon="💸", layout="cent
 # --- AESTHETICS & CSS (Safe Version) ---
 st.markdown("""
     <style>
-        /* Hides the 'Made with Streamlit' footer */
         footer {visibility: hidden;}
-        
-        /* Standard padding */
         .block-container {
             padding-top: 1rem;
             padding-bottom: 5rem;
             padding-left: 1rem;
             padding-right: 1rem;
         }
-        
         [data-testid="stMetricValue"] {
             font-size: 1.8rem;
         }
@@ -35,6 +32,7 @@ st.markdown("""
             margin-bottom: 20px;
             border: 1px solid #444;
         }
+        .stMarkdown { white-space: normal; } /* Ensure text wraps */
     </style>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -43,14 +41,14 @@ st.markdown("""
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- DEFAULTS ---
-# If no custom allowance is found in the DB, use this:
 DEFAULT_ALLOWANCE = 1300.0  
-FIXED_COSTS = 0.0 
-ADMIN_PASSWORD = "1234" 
+FIXED_COSTS = 0.0  
+ADMIN_PASSWORD = "1234"  
 
 # --- DATA ENGINE ---
 def load_data():
-    df = conn.read(worksheet="Logs", usecols=[0, 1, 2, 3], ttl=0)
+    # NOW READING 5 COLUMNS: Date, Item, Category, Amount, ID
+    df = conn.read(worksheet="Logs", usecols=[0, 1, 2, 3, 4], ttl=0) 
     df = df.dropna(how='all')
     if not df.empty:
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
@@ -58,21 +56,41 @@ def load_data():
     return df
 
 def save_entry(item, category, amount):
+    # Generate unique ID for deletion
+    unique_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+    
     df = load_data()
     new_row = pd.DataFrame({
         "Date": [pd.Timestamp(datetime.date.today())], 
         "Item": [item],
         "Category": [category],
-        "Amount": [amount]
+        "Amount": [amount],
+        "ID": [unique_id] # NEW: Save the unique ID
     })
     updated_df = pd.concat([df, new_row], ignore_index=True)
     updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     conn.update(worksheet="Logs", data=updated_df)
 
+# --- NEW: DELETE LOGIC ---
+def delete_entry(entry_id):
+    df = load_data()
+    # Filter out the row with the matching ID
+    df_kept = df[df['ID'] != entry_id].copy()
+    
+    # Ensure dates are strings before saving back
+    if not df_kept.empty:
+        df_kept['Date'] = df_kept['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
+    else:
+        # If sheet is empty after deletion, ensure headers are written correctly (including ID)
+        df_kept = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
+
+    conn.update(worksheet="Logs", data=df_kept)
+
 # --- RESET LOGIC ---
 def reset_data(mode="all"):
     if mode == "all":
-        empty_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount"])
+        # Ensure the empty DataFrame has the new ID column
+        empty_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
         conn.update(worksheet="Logs", data=empty_df)
     
     elif mode == "month":
@@ -84,20 +102,20 @@ def reset_data(mode="all"):
             kept_df['Date'] = kept_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
             conn.update(worksheet="Logs", data=kept_df)
 
-# --- SMART BAR ENGINE ---
+# --- SMART BAR ENGINE (No changes needed) ---
 def render_smart_bar(current_balance, total_monthly_budget):
     if current_balance > total_monthly_budget:
         surplus = current_balance - total_monthly_budget
         fill_pct = 100
         color = "#00cc96" 
         label = "🟢 EXTRA SURPLUS"
-        status_text = f"+{surplus:.0f} MAD Above Budget"
+        status_text = f"+{surplus:.2f} MAD Above Budget" # Decimal change
     elif current_balance < 0:
         debt = abs(current_balance)
         fill_pct = 100
         color = "#ff4b4b" 
         label = "🔴 DEBT ALERT"
-        status_text = f"-{debt:.0f} MAD Overdrawn"
+        status_text = f"-{debt:.2f} MAD Overdrawn" # Decimal change
     else:
         if total_monthly_budget > 0:
             fill_pct = (current_balance / total_monthly_budget) * 100
@@ -121,24 +139,19 @@ def render_smart_bar(current_balance, total_monthly_budget):
 try:
     full_df = load_data()
 except Exception as e:
-    full_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount"])
+    full_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
 
-# 1. SPLIT DATA: REAL TRANSACTIONS vs ADMIN SETTINGS
+# 1. SPLIT DATA
 if not full_df.empty:
-    # Filter out the "ADMIN" category rows (These are setting updates, not spending)
     df = full_df[full_df['Category'] != 'ADMIN'].copy()
-    
-    # Look for the latest Allowance Update
     admin_df = full_df[full_df['Category'] == 'ADMIN']
     if not admin_df.empty:
-        # Get the very last entry
         last_admin_row = admin_df.iloc[-1]
-        # We assume the 'Amount' column holds the new allowance value
         MONTHLY_ALLOWANCE = float(last_admin_row['Amount'])
     else:
         MONTHLY_ALLOWANCE = DEFAULT_ALLOWANCE
 else:
-    df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount"])
+    df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
     MONTHLY_ALLOWANCE = DEFAULT_ALLOWANCE
 
 today = datetime.date.today()
@@ -184,15 +197,31 @@ with st.sidebar:
     
     # ALLOWANCE SETTING
     with st.expander("💰 Edit Allowance"):
+        # Set value to current allowance (uses global MONTHLY_ALLOWANCE)
         new_allowance = st.number_input("New Monthly Limit", value=MONTHLY_ALLOWANCE, step=100.0)
         password_allowance = st.text_input("Password", type="password", key="pw_allowance")
         
         if st.button("Update Allowance"):
             if password_allowance == ADMIN_PASSWORD:
-                # Save as a hidden "ADMIN" row
                 save_entry("Allowance Update", "ADMIN", new_allowance)
-                st.success(f"Allowance changed to {new_allowance}")
+                st.success(f"Allowance changed to {new_allowance:.2f}")
                 st.rerun()
+            else:
+                st.error("Wrong Password")
+
+    # DELETE SINGLE ENTRY (NEW)
+    with st.expander("✂️ Delete Entry"):
+        entry_id_input = st.text_input("Transaction ID to Delete")
+        password_delete = st.text_input("Password", type="password", key="pw_delete")
+        
+        if st.button("Delete Transaction"):
+            if password_delete == ADMIN_PASSWORD:
+                if not entry_id_input:
+                    st.error("Please enter a valid ID.")
+                else:
+                    delete_entry(entry_id_input.strip())
+                    st.success(f"Entry {entry_id_input[:10]}... deleted.")
+                    st.rerun()
             else:
                 st.error("Wrong Password")
 
@@ -221,23 +250,23 @@ with st.sidebar:
 # --- DASHBOARD ---
 st.title("💸 PhD Survival Kit")
 
-# Show Rollover
 if abs(rollover) > 1:
     if rollover > 0:
         st.markdown(f"""
         <div class="rollover-box" style="color: #00cc96;">
-            💰 <b>Savings Carried Over:</b> +{rollover:.0f} MAD added to this month.
+            💰 <b>Savings Carried Over:</b> +{rollover:.2f} MAD added to this month.
         </div>""", unsafe_allow_html=True)
     else:
         st.markdown(f"""
         <div class="rollover-box" style="color: #ff4b4b;">
-            📉 <b>Debt Carried Over:</b> {rollover:.0f} MAD deducted from this month.
+            📉 <b>Debt Carried Over:</b> {rollover:.2f} MAD deducted from this month.
         </div>""", unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Balance", f"{current_balance:.0f} MAD", delta=None)
+# Decimals added: :.2f
+c1.metric("Balance", f"{current_balance:.2f} MAD", delta=None)
 c2.metric("Days Left", f"{days_remaining} d")
-c3.metric("Daily Cap", f"{daily_safe_spend:.0f} MAD", 
+c3.metric("Daily Cap", f"{daily_safe_spend:.2f} MAD", 
           delta_color="normal" if daily_safe_spend > 0 else "inverse")
 
 st.divider()
@@ -255,7 +284,8 @@ with mode_action:
             with st.form("expense_form", clear_on_submit=True):
                 c_a, c_b = st.columns([2, 1])
                 item = c_a.text_input("Item", placeholder="Coffee...")
-                amt = c_b.number_input("Price", min_value=0.0, step=1.0)
+                # Decimal step: step=0.01
+                amt = c_b.number_input("Price", min_value=0.0, step=0.01)
                 cat = st.selectbox("Category", ["Food", "Transport", "Fun", "Bills", "Other"])
                 if st.form_submit_button("🔥 Burn It", type="primary"):
                     if amt > 0:
@@ -266,7 +296,8 @@ with mode_action:
             with st.form("income_form", clear_on_submit=True):
                 c_x, c_y = st.columns([2, 1])
                 source = c_x.text_input("Source")
-                inc_amt = c_y.number_input("Amount", min_value=0.0, step=50.0)
+                # Decimal step: step=0.01
+                inc_amt = c_y.number_input("Amount", min_value=0.0, step=0.01)
                 if st.form_submit_button("🚀 Boost"):
                     if inc_amt > 0:
                         save_entry(source, "Income", -inc_amt)
@@ -275,21 +306,26 @@ with mode_action:
 
     st.subheader("Recent Activity")
     if not df.empty:
-        # df already excludes ADMIN rows, so this is safe
-        recent = df.tail(5).iloc[::-1]
+        recent = df.tail(5).iloc[::-1].copy()
+        
         for index, row in recent.iterrows():
             amt = row['Amount']
+            # Truncate ID for display
+            display_id = str(row['ID'])[:6]
+            
             if amt < 0:
                 st.markdown(f"""
                 <div style="padding: 10px; border-radius: 5px; background-color: #1E1E1E; margin-bottom: 5px;">
                     <span class="item-name">💰 {row['Item']}</span>
-                    <span class="price-tag-pos">+{abs(amt):.0f} MAD</span>
+                    <span class="price-tag-pos">+ {abs(amt):.2f} MAD</span>
+                    <p style='font-size: 0.75rem; color: #888; margin: 0;'>ID: {display_id}...</p>
                 </div>""", unsafe_allow_html=True)
             else:
                 st.markdown(f"""
                 <div style="padding: 10px; border-radius: 5px; background-color: #1E1E1E; margin-bottom: 5px;">
                     <span class="item-name">{row['Item']}</span>
-                    <span class="price-tag-neg">-{amt:.0f} MAD</span>
+                    <span class="price-tag-neg">- {amt:.2f} MAD</span>
+                    <p style='font-size: 0.75rem; color: #888; margin: 0;'>ID: {display_id}...</p>
                 </div>""", unsafe_allow_html=True)
 
 with mode_intel:
@@ -308,7 +344,7 @@ with mode_intel:
         
         if not intel_df.empty:
             total_selected_spend = intel_df[intel_df['Amount'] > 0]['Amount'].sum()
-            st.metric(f"Total Spent in {selected_period}", f"{total_selected_spend:.0f} MAD")
+            st.metric(f"Total Spent in {selected_period}", f"{total_selected_spend:.2f} MAD")
 
             st.caption("Spending by Category")
             cat_data = intel_df[intel_df['Amount'] > 0].groupby('Category')['Amount'].sum().reset_index()
@@ -316,7 +352,7 @@ with mode_intel:
                 x=alt.X('Category', sort='-y'),
                 y='Amount',
                 color=alt.Color('Category', legend=None),
-                tooltip=['Category', 'Amount']
+                tooltip=['Category', alt.Tooltip('Amount', format='.2f')]
             )
             st.altair_chart(chart, use_container_width=True)
 
@@ -325,13 +361,14 @@ with mode_intel:
                 display_df = intel_df.copy().sort_values(by="Date", ascending=False)
                 display_df['Amount'] = display_df['Amount'] * -1
                 def format_currency(val):
-                    return f"+{val:.0f} MAD" if val > 0 else f"{val:.0f} MAD"
+                    return f"+{val:.2f} MAD" if val > 0 else f"{val:.2f} MAD"
                 display_df['Cost'] = display_df['Amount'].apply(format_currency)
                 st.dataframe(
-                    display_df[['Date', 'Item', 'Category', 'Cost']],
+                    display_df[['Date', 'Item', 'Category', 'Cost', 'ID']],
                     use_container_width=True,
                     hide_index=True,
-                    column_config={"Date": st.column_config.DateColumn("Date", format="MMM DD")}
+                    column_config={"Date": st.column_config.DateColumn("Date", format="MMM DD"),
+                                   "ID": st.column_config.TextColumn("ID (for Deletion)", help="First few digits of the unique transaction ID")}
                 )
         else:
             st.info("No data found for this period.")
