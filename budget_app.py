@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import datetime
-import time # Needed for ID generation
+import time 
 from streamlit_gsheets import GSheetsConnection
 import altair as alt
 
@@ -36,7 +36,7 @@ st.markdown("""
             margin-bottom: 20px;
             border: 1px solid #444;
         }
-        .stMarkdown { white-space: normal; } /* Ensure text wraps */
+        .stMarkdown { white-space: normal; }
     </style>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -60,7 +60,7 @@ def load_data():
     return df
 
 def save_entry(item, category, amount):
-    # Generate unique ID for deletion (Shorter format: YYYYMMDDHHMMSS)
+    # Generate unique ID (Shorter format: YYYYMMDDHHMMSS)
     unique_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     
     df = load_data()
@@ -75,7 +75,7 @@ def save_entry(item, category, amount):
     updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     conn.update(worksheet="Logs", data=updated_df)
 
-# --- DELETE LOGIC ---
+# --- DELETE LOGIC (FIXED) ---
 def delete_entry(entry_id):
     df = load_data()
     
@@ -83,21 +83,19 @@ def delete_entry(entry_id):
     entry_id = str(entry_id).strip()
     df['ID'] = df['ID'].astype(str)
     
-    # Check current size for feedback
     initial_count = len(df)
     
     # 2. Filter out the row with the matching ID
-    # This comparison now works because both sides are strings.
+    # Comparison now works because both sides are explicitly strings.
     df_kept = df[df['ID'] != entry_id].copy()
     
-    # Calculate how many rows were removed
     deleted_count = initial_count - len(df_kept)
     
     # 3. Ensure dates are strings before saving back
     if not df_kept.empty:
         df_kept['Date'] = df_kept['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     else:
-        # If sheet is empty after deletion, ensure headers are written correctly (including ID)
+        # If sheet is empty after deletion, ensure headers are written correctly
         df_kept = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
 
     conn.update(worksheet="Logs", data=df_kept)
@@ -106,7 +104,6 @@ def delete_entry(entry_id):
 # --- RESET LOGIC ---
 def reset_data(mode="all"):
     if mode == "all":
-        # Ensure the empty DataFrame has the new ID column
         empty_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
         conn.update(worksheet="Logs", data=empty_df)
     
@@ -124,13 +121,13 @@ def render_smart_bar(current_balance, total_monthly_budget):
     if current_balance > total_monthly_budget:
         surplus = current_balance - total_monthly_budget
         fill_pct = 100
-        color = "#00cc96" 
+        color = "#00cc96" 
         label = "🟢 EXTRA SURPLUS"
-        status_text = f"+{surplus:.2f} MAD Above Budget" 
+        status_text = f"+{surplus:.2f} MAD Above Budget" 
     elif current_balance < 0:
         debt = abs(current_balance)
         fill_pct = 100
-        color = "#ff4b4b" 
+        color = "#ff4b4b" 
         label = "🔴 DEBT ALERT"
         status_text = f"-{debt:.2f} MAD Overdrawn"
     else:
@@ -138,7 +135,7 @@ def render_smart_bar(current_balance, total_monthly_budget):
             fill_pct = (current_balance / total_monthly_budget) * 100
         else:
             fill_pct = 0
-        color = "#29b5e8" 
+        color = "#29b5e8" 
         label = "🔵 CURRENT MONTH BUDGET"
         status_text = f"{fill_pct:.1f}% Remaining"
 
@@ -153,17 +150,11 @@ def render_smart_bar(current_balance, total_monthly_budget):
     """, unsafe_allow_html=True)
 
 # --- MAIN LOGIC ---
-# (The rest of the code will follow here)
 try:
     full_df = load_data()
 except Exception as e:
-    # If loading fails (e.g., initial blank sheet), ensure DF has 5 columns
     full_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
-# DIAGNOSTIC CODE: Check what Pandas actually read
-if not full_df.empty:
-    st.sidebar.warning("DEBUG: Loaded Columns")
-    st.sidebar.write(full_df.columns.tolist())
-    st.sidebar.write(f"Sheet Size: {len(full_df)} rows")
+
 # 1. SPLIT DATA
 if not full_df.empty:
     df = full_df[full_df['Category'] != 'ADMIN'].copy()
@@ -220,7 +211,7 @@ with st.sidebar:
     
     # ALLOWANCE SETTING
     with st.expander("💰 Edit Allowance"):
-        new_allowance = st.number_input("New Monthly Limit", value=MONTHLY_ALLOWANCE, step=0.01) # Decimal input
+        new_allowance = st.number_input("New Monthly Limit", value=MONTHLY_ALLOWANCE, step=0.01)
         password_allowance = st.text_input("Password", type="password", key="pw_allowance")
         
         if st.button("Update Allowance"):
@@ -231,8 +222,9 @@ with st.sidebar:
             else:
                 st.error("Wrong Password")
 
-    # DELETE SINGLE ENTRY (NEW)
+    # DELETE SINGLE ENTRY (FIXED)
     with st.expander("✂️ Delete Entry"):
+        st.caption("Copy the full ID from the Intel Tab.")
         entry_id_input = st.text_input("Transaction ID to Delete")
         password_delete = st.text_input("Password", type="password", key="pw_delete")
         
@@ -241,9 +233,15 @@ with st.sidebar:
                 if not entry_id_input:
                     st.error("Please enter a valid ID.")
                 else:
-                    delete_entry(entry_id_input.strip())
-                    st.success(f"Entry {entry_id_input[:10]}... deleted.")
-                    st.rerun()
+                    try:
+                        deleted_rows = delete_entry(entry_id_input.strip())
+                        if deleted_rows > 0:
+                            st.success(f"✅ Entry deleted successfully. {deleted_rows} row(s) removed.")
+                        else:
+                            st.warning("⚠️ No matching ID found. Check the ID and try again.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Deletion failed: {e}")
             else:
                 st.error("Wrong Password")
 
@@ -272,6 +270,7 @@ with st.sidebar:
 # --- DASHBOARD ---
 st.title("💸 PhD Survival Kit")
 
+# Show Rollover
 if abs(rollover) > 1:
     if rollover > 0:
         st.markdown(f"""
@@ -305,7 +304,6 @@ with mode_action:
             with st.form("expense_form", clear_on_submit=True):
                 c_a, c_b = st.columns([2, 1])
                 item = c_a.text_input("Item", placeholder="Coffee...")
-                # Decimal step: step=0.01
                 amt = c_b.number_input("Price", min_value=0.0, step=0.01)
                 cat = st.selectbox("Category", ["Food", "Transport", "Fun", "Bills", "Other"])
                 if st.form_submit_button("🔥 Burn It", type="primary"):
@@ -317,7 +315,6 @@ with mode_action:
             with st.form("income_form", clear_on_submit=True):
                 c_x, c_y = st.columns([2, 1])
                 source = c_x.text_input("Source")
-                # Decimal step: step=0.01
                 inc_amt = c_y.number_input("Amount", min_value=0.0, step=0.01)
                 if st.form_submit_button("🚀 Boost"):
                     if inc_amt > 0:
@@ -349,7 +346,6 @@ with mode_action:
                     <p style='font-size: 0.75rem; color: #888; margin: 0;'>ID: {display_id} (Full ID: {str(row['ID'])[:6]}...)</p>
                 </div>""", unsafe_allow_html=True)
 
-# === INTEL TAB (TIME MACHINE) ===
 with mode_intel:
     st.header("🧐 Analysis")
     
@@ -366,10 +362,10 @@ with mode_intel:
         
         if not intel_df.empty:
             
-            # --- START OF FIX: Ensure Amount is numeric before plotting/calculating ---
+            # Ensure Amount is numeric before plotting/calculating (Fix for potential KeyErrors on non-numeric data)
             intel_df['Amount'] = pd.to_numeric(intel_df['Amount'], errors='coerce')
             intel_df = intel_df.dropna(subset=['Amount'])
-            
+
             total_selected_spend = intel_df[intel_df['Amount'] > 0]['Amount'].sum()
             st.metric(f"Total Spent in {selected_period}", f"{total_selected_spend:.2f} MAD")
 
@@ -385,22 +381,21 @@ with mode_intel:
 
             st.divider()
             with st.expander(f"📂 View Details for {selected_period}", expanded=True):
-                
-                # --- FIX 2: CREATE COST COLUMN SAFELY ---
+                # Prepare data for display
                 display_df = intel_df.copy().sort_values(by="Date", ascending=False)
                 
                 # Flip the sign for display: Exp(+) -> Exp(-) ; Inc(-) -> Inc(+)
-                display_df['Display_Amount'] = display_df['Amount'] * -1
+                display_df['Amount'] = display_df['Amount'] * -1
                 
-                # Define function inside the scope (standard Python practice)
+                # Define function inside the expander block (standard Python practice)
                 def format_currency_for_display(val):
                     # Val is the display-flipped amount
                     return f"+{val:.2f} MAD" if val >= 0 else f"{val:.2f} MAD"
                 
                 # Create the 'Cost' column using the function on the flipped amount
-                display_df['Cost'] = display_df['Display_Amount'].apply(format_currency_for_display)
+                display_df['Cost'] = display_df['Amount'].apply(format_currency_for_display)
                 
-                # FINAL SELECTION (Should no longer fail on Cost or ID)
+                # Final table selection
                 st.dataframe(
                     display_df[['Date', 'Item', 'Category', 'Cost', 'ID']],
                     use_container_width=True,
