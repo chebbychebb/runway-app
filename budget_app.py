@@ -78,10 +78,22 @@ def save_entry(item, category, amount):
 # --- DELETE LOGIC ---
 def delete_entry(entry_id):
     df = load_data()
-    # Filter out the row with the matching ID
+    
+    # 1. Standardize Input and Column to STRING type (THE FIX)
+    entry_id = str(entry_id).strip()
+    df['ID'] = df['ID'].astype(str)
+    
+    # Check current size for feedback
+    initial_count = len(df)
+    
+    # 2. Filter out the row with the matching ID
+    # This comparison now works because both sides are strings.
     df_kept = df[df['ID'] != entry_id].copy()
     
-    # Ensure dates are strings before saving back
+    # Calculate how many rows were removed
+    deleted_count = initial_count - len(df_kept)
+    
+    # 3. Ensure dates are strings before saving back
     if not df_kept.empty:
         df_kept['Date'] = df_kept['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     else:
@@ -89,6 +101,7 @@ def delete_entry(entry_id):
         df_kept = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
 
     conn.update(worksheet="Logs", data=df_kept)
+    return deleted_count
 
 # --- RESET LOGIC ---
 def reset_data(mode="all"):
@@ -111,13 +124,13 @@ def render_smart_bar(current_balance, total_monthly_budget):
     if current_balance > total_monthly_budget:
         surplus = current_balance - total_monthly_budget
         fill_pct = 100
-        color = "#00cc96" 
+        color = "#00cc96" 
         label = "🟢 EXTRA SURPLUS"
-        status_text = f"+{surplus:.2f} MAD Above Budget" 
+        status_text = f"+{surplus:.2f} MAD Above Budget" 
     elif current_balance < 0:
         debt = abs(current_balance)
         fill_pct = 100
-        color = "#ff4b4b" 
+        color = "#ff4b4b" 
         label = "🔴 DEBT ALERT"
         status_text = f"-{debt:.2f} MAD Overdrawn"
     else:
@@ -125,7 +138,7 @@ def render_smart_bar(current_balance, total_monthly_budget):
             fill_pct = (current_balance / total_monthly_budget) * 100
         else:
             fill_pct = 0
-        color = "#29b5e8" 
+        color = "#29b5e8" 
         label = "🔵 CURRENT MONTH BUDGET"
         status_text = f"{fill_pct:.1f}% Remaining"
 
@@ -140,6 +153,7 @@ def render_smart_bar(current_balance, total_monthly_budget):
     """, unsafe_allow_html=True)
 
 # --- MAIN LOGIC ---
+# (The rest of the code will follow here)
 try:
     full_df = load_data()
 except Exception as e:
