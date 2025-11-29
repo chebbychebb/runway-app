@@ -51,7 +51,6 @@ ADMIN_PASSWORD = "1234"
 
 # --- DATA ENGINE ---
 def load_data():
-    # NOW READING 5 COLUMNS: Date, Item, Category, Amount, ID
     df = conn.read(worksheet="Logs", usecols=[0, 1, 2, 3, 4], ttl=0) 
     df = df.dropna(how='all')
     if not df.empty:
@@ -60,8 +59,8 @@ def load_data():
     return df
 
 def save_entry(item, category, amount):
-    # Generate unique ID (Shorter format: YYYYMMDDHHMMSS)
-    unique_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    # 💥 PERMANENT FIX: Prepend "ID-" to force string format in Google Sheets
+    unique_id = "ID-" + datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     
     df = load_data()
     new_row = pd.DataFrame({
@@ -69,24 +68,27 @@ def save_entry(item, category, amount):
         "Item": [item],
         "Category": [category],
         "Amount": [amount],
-        "ID": [unique_id] # Save the unique ID
+        "ID": [unique_id] # Saves as ID-YYYYMMDDHHMMSS
     })
     updated_df = pd.concat([df, new_row], ignore_index=True)
     updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     conn.update(worksheet="Logs", data=updated_df)
 
-# --- DELETE LOGIC (FIXED) ---
+# --- DELETE LOGIC (FINAL FIXED VERSION) ---
 def delete_entry(entry_id):
     df = load_data()
     
-    # 1. Standardize Input and Column to STRING type (THE FIX)
+    # 1. Ensure the comparison types are strictly strings (needed for reading IDs)
     entry_id = str(entry_id).strip()
+    # Check if the ID is missing the prefix and add it back for lookup
+    if not entry_id.startswith("ID-"):
+        entry_id = "ID-" + entry_id
+        
     df['ID'] = df['ID'].astype(str)
     
     initial_count = len(df)
     
     # 2. Filter out the row with the matching ID
-    # Comparison now works because both sides are explicitly strings.
     df_kept = df[df['ID'] != entry_id].copy()
     
     deleted_count = initial_count - len(df_kept)
@@ -95,7 +97,6 @@ def delete_entry(entry_id):
     if not df_kept.empty:
         df_kept['Date'] = df_kept['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     else:
-        # If sheet is empty after deletion, ensure headers are written correctly
         df_kept = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
 
     conn.update(worksheet="Logs", data=df_kept)
@@ -133,11 +134,14 @@ def render_smart_bar(current_balance, total_monthly_budget):
     else:
         if total_monthly_budget > 0:
             fill_pct = (current_balance / total_monthly_budget) * 100
+            color = "#29b5e8" 
+            label = "🔵 CURRENT MONTH BUDGET"
+            status_text = f"{fill_pct:.1f}% Remaining"
         else:
             fill_pct = 0
-        color = "#29b5e8" 
-        label = "🔵 CURRENT MONTH BUDGET"
-        status_text = f"{fill_pct:.1f}% Remaining"
+            color = "#808080"
+            label = "⚫ LOW BUDGET BASE"
+            status_text = "N/A"
 
     st.markdown(f"""
         <div style="margin-bottom: 5px; font-size: 0.8rem; color: #888;">{label}</div>
@@ -224,7 +228,7 @@ with st.sidebar:
 
     # DELETE SINGLE ENTRY (FIXED)
     with st.expander("✂️ Delete Entry"):
-        st.caption("Copy the full ID from the Intel Tab.")
+        st.caption("Copy the ID from the Intel Tab (e.g., ID-202511...).")
         entry_id_input = st.text_input("Transaction ID to Delete")
         password_delete = st.text_input("Password", type="password", key="pw_delete")
         
@@ -362,7 +366,7 @@ with mode_intel:
         
         if not intel_df.empty:
             
-            # Ensure Amount is numeric before plotting/calculating (Fix for potential KeyErrors on non-numeric data)
+            # Ensure Amount is numeric before plotting/calculating
             intel_df['Amount'] = pd.to_numeric(intel_df['Amount'], errors='coerce')
             intel_df = intel_df.dropna(subset=['Amount'])
 
@@ -387,9 +391,8 @@ with mode_intel:
                 # Flip the sign for display: Exp(+) -> Exp(-) ; Inc(-) -> Inc(+)
                 display_df['Amount'] = display_df['Amount'] * -1
                 
-                # Define function inside the expander block (standard Python practice)
+                # Define function inside the expander block
                 def format_currency_for_display(val):
-                    # Val is the display-flipped amount
                     return f"+{val:.2f} MAD" if val >= 0 else f"{val:.2f} MAD"
                 
                 # Create the 'Cost' column using the function on the flipped amount
