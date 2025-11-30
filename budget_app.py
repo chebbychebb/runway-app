@@ -60,7 +60,6 @@ def load_data():
     return df
 
 def save_entry(item, category, amount):
-    # 💥 PERMANENT FIX: Prepend "ID-" to force string format in Google Sheets
     unique_id = "ID-" + datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     
     df = load_data()
@@ -69,32 +68,24 @@ def save_entry(item, category, amount):
         "Item": [item],
         "Category": [category],
         "Amount": [amount],
-        "ID": [unique_id] # Saves as ID-YYYYMMDDHHMMSS
+        "ID": [unique_id]
     })
     updated_df = pd.concat([df, new_row], ignore_index=True)
     updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     conn.update(worksheet="Logs", data=updated_df)
 
-# --- DELETE LOGIC (FINAL FIXED VERSION) ---
+# --- DELETE LOGIC (WORKING) ---
 def delete_entry(entry_id):
     df = load_data()
-    
-    # 1. Ensure the comparison types are strictly strings (needed for reading IDs)
     entry_id = str(entry_id).strip()
-    # Check if the ID is missing the prefix and add it back for lookup
     if not entry_id.startswith("ID-"):
         entry_id = "ID-" + entry_id
         
     df['ID'] = df['ID'].astype(str)
-    
     initial_count = len(df)
-    
-    # 2. Filter out the row with the matching ID
     df_kept = df[df['ID'] != entry_id].copy()
-    
     deleted_count = initial_count - len(df_kept)
     
-    # 3. Ensure dates are strings before saving back
     if not df_kept.empty:
         df_kept['Date'] = df_kept['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
     else:
@@ -153,7 +144,8 @@ def render_smart_bar(current_balance, total_monthly_budget):
             {status_text}
         </div>
     """, unsafe_allow_html=True)
-# --- MAIN LOGIC ---
+
+# --- MAIN LOGIC (FINAL REVISION) ---
 try:
     full_df = load_data()
 except Exception as e:
@@ -173,24 +165,31 @@ else:
     df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
     MONTHLY_ALLOWANCE = DEFAULT_ALLOWANCE
 
+# SET TIMEZONE
 CASABLANCA_TZ = pytz.timezone('Africa/Casablanca')
 today_dt = datetime.datetime.now(CASABLANCA_TZ)
 today = today_dt.date()
 
-# 2. ROLLOVER (THE FIX IS HERE)
+# 2. ROLLOVER (THE FINAL FIX)
 if not df.empty:
     start_date = df['Date'].min()
     
-    # NEW CHECK: If the start date is in the current month, we have 0 months of past allowance.
-    if start_date.month == today.month and start_date.year == today.year:
-        months_passed = 0
+    # Calculate months passed based on date difference (Correctly handles year/month changes)
+    # The result is the total number of whole months elapsed between start and today.
+    total_months_elapsed = (today.year - start_date.year) * 12 + (today.month - start_date.month)
+
+    # If all data is from the current month, force the past funding months to ZERO.
+    if total_months_elapsed == 0:
+        months_passed_for_rollover = 0
     else:
-        # If not current month, calculate full months passed
-        months_passed = (today.year - start_date.year) * 12 + (today.month - start_date.month)
-    
+        months_passed_for_rollover = total_months_elapsed
+
     past_mask = (df['Date'] < pd.Timestamp(today.year, today.month, 1))
     past_net_spend = df.loc[past_mask, "Amount"].sum()
-    past_total_allowance = months_passed * (MONTHLY_ALLOWANCE - FIXED_COSTS)
+    
+    # Calculate total historic allowance based on WHOLE MONTHS passed
+    past_total_allowance = months_passed_for_rollover * (MONTHLY_ALLOWANCE - FIXED_COSTS)
+    
     rollover = past_total_allowance - past_net_spend
 else:
     rollover = 0.0
@@ -342,7 +341,6 @@ with mode_action:
         
         for index, row in recent.iterrows():
             amt = row['Amount']
-            # Get the last 6 digits (HHMMSS) of the ID for quick reference
             display_id = str(row['ID'])[-6:] 
             
             if amt < 0:
@@ -380,8 +378,8 @@ with mode_intel:
             intel_df['Amount'] = pd.to_numeric(intel_df['Amount'], errors='coerce')
             intel_df = intel_df.dropna(subset=['Amount'])
 
-            total_selected_spend = intel_df[intel_df['Amount'] > 0]['Amount'].sum()
-            st.metric(f"Total Spent in {selected_period}", f"{total_selected_spend:.2f} MAD")
+            total_selected_spend = intel_df[intel_df['Amount'] > 0].groupby('Category')['Amount'].sum().reset_index()
+            st.metric(f"Total Spent in {selected_period}", f"{total_selected_spend['Amount'].sum():.2f} MAD")
 
             st.caption("Spending by Category")
             cat_data = intel_df[intel_df['Amount'] > 0].groupby('Category')['Amount'].sum().reset_index()
