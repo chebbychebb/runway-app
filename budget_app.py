@@ -309,7 +309,7 @@ with mode_action:
                 c_a, c_b = st.columns([2, 1])
                 item = c_a.text_input("Item", placeholder="Coffee...")
                 amt = c_b.number_input("Price", min_value=0.0, step=0.01)
-                cat = st.selectbox("Category", ["Food", "Transport", "Fun", "Bills", "Other"])
+                cat = st.selectbox("Category", ["Food", "Transport", "Fun","Personal Care","Bills","Other"])
                 if st.form_submit_button("🔥 Burn It", type="primary"):
                     if amt > 0:
                         save_entry(item, cat, amt)
