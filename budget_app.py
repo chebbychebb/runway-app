@@ -173,7 +173,9 @@ else:
     df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
     MONTHLY_ALLOWANCE = DEFAULT_ALLOWANCE
 
-today = datetime.date.today()
+CASABLANCA_TZ = pytz.timezone('Africa/Casablanca')
+today_dt = datetime.datetime.now(CASABLANCA_TZ)
+today = today_dt.date()
 
 # 2. ROLLOVER (THE FIX IS HERE)
 if not df.empty:
