@@ -153,7 +153,6 @@ def render_smart_bar(current_balance, total_monthly_budget):
             {status_text}
         </div>
     """, unsafe_allow_html=True)
-
 # --- MAIN LOGIC ---
 try:
     full_df = load_data()
@@ -163,6 +162,7 @@ except Exception as e:
 # 1. SPLIT DATA
 if not full_df.empty:
     df = full_df[full_df['Category'] != 'ADMIN'].copy()
+    
     admin_df = full_df[full_df['Category'] == 'ADMIN']
     if not admin_df.empty:
         last_admin_row = admin_df.iloc[-1]
@@ -173,14 +173,19 @@ else:
     df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
     MONTHLY_ALLOWANCE = DEFAULT_ALLOWANCE
 
-CASABLANCA_TZ = pytz.timezone('Africa/Casablanca')
-today_dt = datetime.datetime.now(CASABLANCA_TZ)
-today = today_dt.date()
+today = datetime.date.today()
 
-# 2. ROLLOVER
+# 2. ROLLOVER (THE FIX IS HERE)
 if not df.empty:
     start_date = df['Date'].min()
-    months_passed = (today.year - start_date.year) * 12 + (today.month - start_date.month)
+    
+    # NEW CHECK: If the start date is in the current month, we have 0 months of past allowance.
+    if start_date.month == today.month and start_date.year == today.year:
+        months_passed = 0
+    else:
+        # If not current month, calculate full months passed
+        months_passed = (today.year - start_date.year) * 12 + (today.month - start_date.month)
+    
     past_mask = (df['Date'] < pd.Timestamp(today.year, today.month, 1))
     past_net_spend = df.loc[past_mask, "Amount"].sum()
     past_total_allowance = months_passed * (MONTHLY_ALLOWANCE - FIXED_COSTS)
