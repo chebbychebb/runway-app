@@ -4,6 +4,7 @@ import datetime
 import time 
 from streamlit_gsheets import GSheetsConnection
 import altair as alt
+import pytz
 
 # --- CONFIG ---
 st.set_page_config(page_title="PhD Survival Kit", page_icon="💸", layout="centered")
