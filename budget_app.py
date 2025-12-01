@@ -429,7 +429,8 @@ with mode_debt:
             
             if st.form_submit_button("Log Liability"):
                 if debt_item and debt_amt > 0:
-                    save_entry(debt_item, debt_amt, worksheet_name="Liabilities")
+                    # FIX: Passed "DEBT_LOG" as the placeholder for the unused 'category' slot.
+                    save_entry(debt_item, "DEBT_LOG", debt_amt, worksheet_name="Liabilities")
                     st.success(f"Liability for {debt_amt:.2f} MAD logged.")
                     st.rerun()
                 else:
@@ -445,6 +446,9 @@ with mode_debt:
     
     if not active_debt.empty:
         # Create a dictionary for the select box: {Item Name: Debt_ID}
+        # Ensure 'Amount' is float for formatting
+        active_debt['Amount'] = pd.to_numeric(active_debt['Amount'], errors='coerce')
+        
         debt_options = {
             f"{row['Item']} (Owed: {row['Amount']:.2f} MAD)": row['Debt_ID']
             for index, row in active_debt.iterrows()
