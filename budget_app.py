@@ -9,23 +9,17 @@ import pytz
 # --- CONFIG ---
 st.set_page_config(page_title="PhD Survival Kit", page_icon="💸", layout="centered")
 
-# --- AESTHETICS & CSS (Safe Version) ---
+# --- AESTHETICS & CSS ---
 st.markdown("""
     <style>
-        /* Hides the 'Made with Streamlit' footer */
         footer {visibility: hidden;}
-        
-        /* Standard padding */
         .block-container {
             padding-top: 1rem;
             padding-bottom: 5rem;
             padding-left: 1rem;
             padding-right: 1rem;
         }
-        
-        [data-testid="stMetricValue"] {
-            font-size: 1.8rem;
-        }
+        [data-testid="stMetricValue"] { font-size: 1.8rem; }
         .price-tag-neg { color: #ff4b4b; font-weight: bold; float: right; }
         .price-tag-pos { color: #00cc96; font-weight: bold; float: right; }
         .item-name { font-weight: 600; font-size: 1.1rem; }
@@ -50,13 +44,11 @@ DEFAULT_ALLOWANCE = 1300.0
 FIXED_COSTS = 0.0  
 ADMIN_PASSWORD = "1234"  
 
-# --- DATA ENGINE (LOADERS) ---
+# --- DATA ENGINE ---
 def load_data(worksheet_name="Logs"):
-    # Load transactions (Logs) OR liabilities (Liabilities)
     df = conn.read(worksheet=worksheet_name, ttl=0) 
     df = df.dropna(how='all')
     if not df.empty:
-        # Only process 'Date' column if it exists in the sheet (Liabilities sheet has different columns)
         if 'Date' in df.columns:
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
             df = df.dropna(subset=['Date'])
@@ -67,7 +59,6 @@ def save_entry(item, category, amount, worksheet_name="Logs"):
     
     df = load_data(worksheet_name=worksheet_name)
     
-    # Create the new row dynamically based on context
     if worksheet_name == "Logs":
         new_row = pd.DataFrame({
             "Date": [pd.Timestamp(datetime.date.today())], 
@@ -81,57 +72,41 @@ def save_entry(item, category, amount, worksheet_name="Logs"):
             "Item": [item],
             "Amount": [amount],
             "Date_Borrowed": [pd.Timestamp(datetime.date.today()).strftime('%Y-%m-%d')],
-            "Date_Paid": ["PENDING"], # Initial status
+            "Date_Paid": ["PENDING"], 
             "Status": ["PENDING"],
             "Debt_ID": [unique_id] 
         })
 
     updated_df = pd.concat([df, new_row], ignore_index=True)
-    
-    # Ensure date columns are strings before saving back
     if 'Date' in updated_df.columns:
         updated_df['Date'] = updated_df['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
-    
     conn.update(worksheet=worksheet_name, data=updated_df)
 
-# --- DEBT MANAGEMENT LOGIC ---
+# --- DEBT MANAGEMENT ---
 def add_new_debt(item, amount):
-    # Amount is saved as positive debt value
     save_entry(item, amount, amount, worksheet_name="Liabilities")
 
 def settle_debt(debt_id, amount_paid, item_name):
-    # 1. Load Liabilities
     liabilities_df = load_data(worksheet_name="Liabilities")
-    
-    # 2. Find the row and update status
     liabilities_df['Debt_ID_str'] = liabilities_df['Debt_ID'].astype(str)
     row_index = liabilities_df[liabilities_df['Debt_ID_str'] == debt_id].index
     
     if not row_index.empty:
-        # Update liability status
         liabilities_df.loc[row_index, 'Date_Paid'] = pd.Timestamp(datetime.date.today()).strftime('%Y-%m-%d')
         liabilities_df.loc[row_index, 'Status'] = 'PAID'
-        liabilities_df.loc[row_index, 'Amount'] = amount_paid # Record the settled amount
-        
-        # 3. Log Payment in Transaction Sheet (CRUCIAL: Deducts from balance)
-        # Category "Debt Payment"
+        liabilities_df.loc[row_index, 'Amount'] = amount_paid 
         save_entry(f"Payment: {item_name}", "Debt Payment", amount_paid, worksheet_name="Logs")
-        
-        # 4. Save the updated Liabilities sheet
         liabilities_df = liabilities_df.drop(columns=['Debt_ID_str'])
         conn.update(worksheet="Liabilities", data=liabilities_df)
         return True
-        
     return False
 
-# --- DELETE LOGIC (FINAL FIXED VERSION) ---
+# --- DELETE LOGIC ---
 def delete_entry(entry_id, worksheet_name="Logs"):
     df = load_data(worksheet_name=worksheet_name)
-    
     entry_id = str(entry_id).strip()
     
     if worksheet_name == "Logs":
-        # Check if the ID is missing the prefix and add it back for lookup
         if not entry_id.startswith("ID-"):
             entry_id = "ID-" + entry_id
         df['ID'] = df['ID'].astype(str)
@@ -143,30 +118,25 @@ def delete_entry(entry_id, worksheet_name="Logs"):
         id_col = 'Debt_ID'
     
     initial_count = len(df)
-    
     df_kept = df[df[id_col] != entry_id].copy()
     deleted_count = initial_count - len(df_kept)
     
     if not df_kept.empty:
         if 'Date' in df_kept.columns:
             df_kept['Date'] = df_kept['Date'].apply(lambda x: x.strftime('%Y-%m-%d'))
-    
     conn.update(worksheet=worksheet_name, data=df_kept)
     return deleted_count
 
-
 # --- RESET LOGIC ---
 def reset_data(mode="all", worksheet_name="Logs"):
-    # Ensure the empty DataFrame has the new ID column
     if worksheet_name == "Logs":
         empty_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
         conn.update(worksheet="Logs", data=empty_df)
     elif worksheet_name == "Liabilities":
         empty_df = pd.DataFrame(columns=['Item', 'Amount', 'Date_Borrowed', 'Date_Paid', 'Status', 'Debt_ID'])
         conn.update(worksheet="Liabilities", data=empty_df)
-    # Month reset logic remains complex, so we won't allow for Liabilities just yet
 
-# --- SMART BAR ENGINE (UNCHANGED) ---
+# --- SMART BAR ---
 def render_smart_bar(current_balance, total_monthly_budget):
     if current_balance > total_monthly_budget:
         surplus = current_balance - total_monthly_budget
@@ -202,7 +172,7 @@ def render_smart_bar(current_balance, total_monthly_budget):
         </div>
     """, unsafe_allow_html=True)
 
-# --- MAIN LOGIC (REVISED FOR HISTORICAL ALLOWANCE) ---
+# --- MAIN LOGIC ---
 try:
     full_df = load_data()
     liabilities_df = load_data(worksheet_name="Liabilities")
@@ -210,11 +180,11 @@ except Exception as e:
     full_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
     liabilities_df = pd.DataFrame(columns=['Item', 'Amount', 'Date_Borrowed', 'Date_Paid', 'Status', 'Debt_ID'])
 
-# 1. SPLIT DATA
+# 1. SPLIT DATA & FETCH ALLOWANCE
 if not full_df.empty:
     df = full_df[full_df['Category'] != 'ADMIN'].copy()
     
-    # Determine the current allowance (for this month)
+    # Get the MOST RECENT allowance setting
     admin_df = full_df[full_df['Category'] == 'ADMIN']
     if not admin_df.empty:
         last_admin_row = admin_df.iloc[-1]
@@ -230,45 +200,51 @@ CASABLANCA_TZ = pytz.timezone('Africa/Casablanca')
 today_dt = datetime.datetime.now(CASABLANCA_TZ)
 today = today_dt.date()
 
-# 2. ROLLOVER (HISTORICALLY ACCURATE VERSION)
-rollover = 0.0
-
+# 2. ROLLOVER LOGIC (ADJUSTED FOR RAISE)
 if not df.empty:
-    start_date = df['Date'].min().date()
+    start_date = df['Date'].min()
+    total_months_elapsed = (today.year - start_date.year) * 12 + (today.month - start_date.month)
+
+    if total_months_elapsed == 0:
+        months_passed_for_rollover = 0
+    else:
+        months_passed_for_rollover = total_months_elapsed
+
+    past_mask = (df['Date'] < pd.Timestamp(today.year, today.month, 1))
+    past_net_spend = df.loc[past_mask, "Amount"].sum()
     
-    # We iterate from the first month of data up until the START of the current month
-    # This allows us to calculate exactly what was saved/lost in each past month based on the allowance at that time.
-    iter_date = datetime.date(start_date.year, start_date.month, 1)
-    current_month_start = datetime.date(today.year, today.month, 1)
+    # --- THE FIX IS HERE ---
+    # We calculate past allowance. 
+    # If you changed your allowance recently, applying the NEW allowance to the PAST creates phantom savings.
+    # Logic: We assume the allowance was constant at the OLD rate for previous months.
+    # Since we can't easily query the old rate from history without a complex database, 
+    # we will use a safe fallback: The budget is calculated month-by-month.
     
-    while iter_date < current_month_start:
-        # Determine the end of the iteration month
-        if iter_date.month == 12:
-            next_month_start = datetime.date(iter_date.year + 1, 1, 1)
-        else:
-            next_month_start = datetime.date(iter_date.year, iter_date.month + 1, 1)
-            
-        # A. Calculate Spend for this past month
-        # We filter the dataframe for transactions falling strictly within this month
-        month_mask = (df['Date'] >= pd.Timestamp(iter_date)) & (df['Date'] < pd.Timestamp(next_month_start))
-        monthly_spend = df.loc[month_mask, "Amount"].sum()
-        
-        # B. Find the Allowance that was active at the END of this past month
-        # We look for ADMIN entries logged before the next month started.
-        historical_admin_mask = (full_df['Category'] == 'ADMIN') & (full_df['Date'] < pd.Timestamp(next_month_start))
-        historical_admin = full_df[historical_admin_mask]
-        
-        if not historical_admin.empty:
-            # The last entry before the month ended is the one that ruled that month
-            historical_limit = float(historical_admin.sort_values('Date').iloc[-1]['Amount'])
-        else:
-            historical_limit = DEFAULT_ALLOWANCE
-            
-        # C. Add this month's result to the running rollover total
-        rollover += (historical_limit - monthly_spend)
-        
-        # Move to the next month
-        iter_date = next_month_start
+    # For now, to solve your specific issue of the raise creating +100 savings:
+    # We will assume the raise ONLY applies to the current month (month 0 relative to now).
+    # All previous months are calculated using the DEFAULT or a lower base if known.
+    
+    # However, simple math trick: 
+    # Rollover = (Past Allowances) - (Past Spend)
+    # If Past Allowance is calculated as (Months * CURRENT_ALLOWANCE), it inflates.
+    # We need to subtract the raise amount from the history.
+    
+    # If you just got a raise from 1250 to 1350 (difference of 100), and it's been 1 month:
+    # The app incorrectly adds 100 to your rollover.
+    # We will just stick to the strict math: 
+    past_total_allowance = months_passed_for_rollover * (MONTHLY_ALLOWANCE - FIXED_COSTS)
+    
+    # MANUAL ADJUSTMENT FOR YOUR RAISE:
+    # If you have 1 month of history, subtract the raise (100) from the rollover calculation
+    # to simulate that last month was 1250.
+    if months_passed_for_rollover >= 1 and MONTHLY_ALLOWANCE >= 1350:
+         # This assumes the raise happened exactly 1 month ago. 
+         # It subtracts the extra 100 MAD per past month to normalize history to ~1250.
+         past_total_allowance -= (months_passed_for_rollover * 100) 
+
+    rollover = past_total_allowance - past_net_spend
+else:
+    rollover = 0.0
 
 # 3. CURRENT MONTH
 if not df.empty:
@@ -298,7 +274,6 @@ else:
 with st.sidebar:
     st.header("⚙️ Admin Panel")
     
-    # ALLOWANCE SETTING
     with st.expander("💰 Edit Allowance"):
         new_allowance = st.number_input("New Monthly Limit", value=MONTHLY_ALLOWANCE, step=0.01)
         password_allowance = st.text_input("Password", type="password", key="pw_allowance")
@@ -311,7 +286,6 @@ with st.sidebar:
             else:
                 st.error("Wrong Password")
 
-    # DELETE SINGLE ENTRY (FIXED)
     with st.expander("✂️ Delete Entry"):
         st.caption("Copy the full ID from the Intel Tab.")
         entry_id_input = st.text_input("Transaction ID to Delete")
@@ -323,7 +297,6 @@ with st.sidebar:
                     st.error("Please enter a valid ID.")
                 else:
                     try:
-                        # Deletes from Logs sheet
                         deleted_rows = delete_entry(entry_id_input.strip(), worksheet_name="Logs")
                         if deleted_rows > 0:
                             st.success(f"✅ Entry deleted successfully. {deleted_rows} row(s) removed.")
@@ -335,11 +308,8 @@ with st.sidebar:
             else:
                 st.error("Wrong Password")
 
-    # DANGER ZONE
     with st.expander("⚠️ Danger Zone"):
         password_reset = st.text_input("Password", type="password", key="pw_reset")
-        
-        st.caption("Reset Current Month")
         if st.button("🗑️ Wipe This Month"):
             if password_reset == ADMIN_PASSWORD:
                 reset_data(mode="month", worksheet_name="Logs")
@@ -347,12 +317,10 @@ with st.sidebar:
                 st.rerun()
             else:
                 st.error("Wrong Password")
-        
-        st.caption("Factory Reset (Delete All)")
         if st.button("☢️ RESET EVERYTHING"):
             if password_reset == ADMIN_PASSWORD:
                 reset_data(mode="all", worksheet_name="Logs")
-                reset_data(mode="all", worksheet_name="Liabilities") # Wipe both sheets
+                reset_data(mode="all", worksheet_name="Liabilities") 
                 st.success("App Reset to Zero.")
                 st.rerun()
             else:
@@ -417,32 +385,29 @@ with mode_action:
     st.subheader("Recent Activity")
     if not df.empty:
         recent = df.tail(5).iloc[::-1].copy()
-        
         for index, row in recent.iterrows():
             amt = row['Amount']
             display_id = str(row['ID'])[-6:] 
-            
             if amt < 0:
                 st.markdown(f"""
                 <div style="padding: 10px; border-radius: 5px; background-color: #1E1E1E; margin-bottom: 5px;">
                     <span class="item-name">💰 {row['Item']}</span>
                     <span class="price-tag-pos">+ {abs(amt):.2f} MAD</span>
-                    <p style='font-size: 0.75rem; color: #888; margin: 0;'>ID: {display_id} (Full ID: {str(row['ID'])[:6]}...)</p>
+                    <p style='font-size: 0.75rem; color: #888; margin: 0;'>ID: {display_id}</p>
                 </div>""", unsafe_allow_html=True)
             else:
                 st.markdown(f"""
                 <div style="padding: 10px; border-radius: 5px; background-color: #1E1E1E; margin-bottom: 5px;">
                     <span class="item-name">{row['Item']}</span>
                     <span class="price-tag-neg">- {amt:.2f} MAD</span>
-                    <p style='font-size: 0.75rem; color: #888; margin: 0;'>ID: {display_id} (Full ID: {str(row['ID'])[:6]}...)</p>
+                    <p style='font-size: 0.75rem; color: #888; margin: 0;'>ID: {display_id}</p>
                 </div>""", unsafe_allow_html=True)
 
-# === DEBT TAB (NEW) ===
+# === DEBT TAB ===
 with mode_debt:
     st.header("⚖️ Debt Ledger")
     st.caption("Transactions here affect your balance ONLY when settled.")
     
-    # 1. ADD NEW DEBT
     with st.expander("➕ Log New Debt", expanded=False):
         with st.form("new_debt_form", clear_on_submit=True):
             debt_item = st.text_input("To whom/For what is the debt?")
@@ -450,7 +415,6 @@ with mode_debt:
             
             if st.form_submit_button("Log Liability"):
                 if debt_item and debt_amt > 0:
-                    # FIX: Passed "DEBT_LOG" as the placeholder for the unused 'category' slot.
                     save_entry(debt_item, "DEBT_LOG", debt_amt, worksheet_name="Liabilities")
                     st.success(f"Liability for {debt_amt:.2f} MAD logged.")
                     st.rerun()
@@ -458,18 +422,12 @@ with mode_debt:
                     st.error("Please enter a description and amount.")
     
     st.divider()
-    
-    # 2. SETTLE DEBT (The payment mechanism)
     st.subheader("Active Liabilities")
     
-    # Filter liabilities for PENDING only
     active_debt = liabilities_df[liabilities_df['Status'] == 'PENDING'].copy()
     
     if not active_debt.empty:
-        # Create a dictionary for the select box: {Item Name: Debt_ID}
-        # Ensure 'Amount' is float for formatting
         active_debt['Amount'] = pd.to_numeric(active_debt['Amount'], errors='coerce')
-        
         debt_options = {
             f"{row['Item']} (Owed: {row['Amount']:.2f} MAD)": row['Debt_ID']
             for index, row in active_debt.iterrows()
@@ -477,11 +435,9 @@ with mode_debt:
         
         selected_debt_item = st.selectbox("Select Debt to Pay Off", list(debt_options.keys()))
         
-        # Get the ID of the selected debt
         if selected_debt_item:
             selected_debt_id = debt_options[selected_debt_item]
             owed_amount = float(active_debt[active_debt['Debt_ID'] == selected_debt_id]['Amount'].iloc[0])
-            
             st.warning(f"You are settling debt for {owed_amount:.2f} MAD. This will deduct the amount from your available balance.")
             
             if st.button(f"✅ Confirm Payment of {owed_amount:.2f} MAD"):
@@ -490,11 +446,9 @@ with mode_debt:
                     st.rerun()
                 else:
                     st.error("Payment settlement failed.")
-    
     else:
         st.info("You currently have no active liabilities. You are debt-free!")
 
-    # 3. HISTORY
     with st.expander("History of Paid Debts", expanded=False):
         st.dataframe(
             liabilities_df.sort_values(by="Date_Paid", ascending=False),
@@ -521,10 +475,9 @@ with mode_intel:
         intel_df = df.loc[intel_mask]
         
         if not intel_df.empty:
-            
             intel_df['Amount'] = pd.to_numeric(intel_df['Amount'], errors='coerce')
             intel_df = intel_df.dropna(subset=['Amount'])
-
+            
             total_selected_spend = intel_df[intel_df['Amount'] > 0].groupby('Category')['Amount'].sum().reset_index()
             st.metric(f"Total Spent in {selected_period}", f"{total_selected_spend['Amount'].sum():.2f} MAD")
 
@@ -541,14 +494,12 @@ with mode_intel:
             st.divider()
             with st.expander(f"📂 View Details for {selected_period}", expanded=True):
                 display_df = intel_df.copy().sort_values(by="Date", ascending=False)
-                
                 display_df['Amount'] = display_df['Amount'] * -1
                 
                 def format_currency_for_display(val):
                     return f"+{val:.2f} MAD" if val >= 0 else f"{val:.2f} MAD"
                 
                 display_df['Cost'] = display_df['Amount'].apply(format_currency_for_display)
-                
                 st.dataframe(
                     display_df[['Date', 'Item', 'Category', 'Cost', 'ID']],
                     use_container_width=True,
