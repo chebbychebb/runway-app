@@ -202,19 +202,19 @@ def render_smart_bar(current_balance, total_monthly_budget):
         </div>
     """, unsafe_allow_html=True)
 
-# --- MAIN LOGIC (FINAL REVISION) ---
+# --- MAIN LOGIC (REVISED FOR HISTORICAL ALLOWANCE) ---
 try:
     full_df = load_data()
     liabilities_df = load_data(worksheet_name="Liabilities")
 except Exception as e:
     full_df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
     liabilities_df = pd.DataFrame(columns=['Item', 'Amount', 'Date_Borrowed', 'Date_Paid', 'Status', 'Debt_ID'])
-    # You may need to create the Liabilities sheet manually if it doesn't exist upon first run
 
 # 1. SPLIT DATA
 if not full_df.empty:
     df = full_df[full_df['Category'] != 'ADMIN'].copy()
     
+    # Determine the current allowance (for this month)
     admin_df = full_df[full_df['Category'] == 'ADMIN']
     if not admin_df.empty:
         last_admin_row = admin_df.iloc[-1]
@@ -230,24 +230,45 @@ CASABLANCA_TZ = pytz.timezone('Africa/Casablanca')
 today_dt = datetime.datetime.now(CASABLANCA_TZ)
 today = today_dt.date()
 
-# 2. ROLLOVER
+# 2. ROLLOVER (HISTORICALLY ACCURATE VERSION)
+rollover = 0.0
+
 if not df.empty:
-    start_date = df['Date'].min()
-    total_months_elapsed = (today.year - start_date.year) * 12 + (today.month - start_date.month)
-
-    if total_months_elapsed == 0:
-        months_passed_for_rollover = 0
-    else:
-        months_passed_for_rollover = total_months_elapsed
-
-    past_mask = (df['Date'] < pd.Timestamp(today.year, today.month, 1))
-    past_net_spend = df.loc[past_mask, "Amount"].sum()
+    start_date = df['Date'].min().date()
     
-    past_total_allowance = months_passed_for_rollover * (MONTHLY_ALLOWANCE - FIXED_COSTS)
+    # We iterate from the first month of data up until the START of the current month
+    # This allows us to calculate exactly what was saved/lost in each past month based on the allowance at that time.
+    iter_date = datetime.date(start_date.year, start_date.month, 1)
+    current_month_start = datetime.date(today.year, today.month, 1)
     
-    rollover = past_total_allowance - past_net_spend
-else:
-    rollover = 0.0
+    while iter_date < current_month_start:
+        # Determine the end of the iteration month
+        if iter_date.month == 12:
+            next_month_start = datetime.date(iter_date.year + 1, 1, 1)
+        else:
+            next_month_start = datetime.date(iter_date.year, iter_date.month + 1, 1)
+            
+        # A. Calculate Spend for this past month
+        # We filter the dataframe for transactions falling strictly within this month
+        month_mask = (df['Date'] >= pd.Timestamp(iter_date)) & (df['Date'] < pd.Timestamp(next_month_start))
+        monthly_spend = df.loc[month_mask, "Amount"].sum()
+        
+        # B. Find the Allowance that was active at the END of this past month
+        # We look for ADMIN entries logged before the next month started.
+        historical_admin_mask = (full_df['Category'] == 'ADMIN') & (full_df['Date'] < pd.Timestamp(next_month_start))
+        historical_admin = full_df[historical_admin_mask]
+        
+        if not historical_admin.empty:
+            # The last entry before the month ended is the one that ruled that month
+            historical_limit = float(historical_admin.sort_values('Date').iloc[-1]['Amount'])
+        else:
+            historical_limit = DEFAULT_ALLOWANCE
+            
+        # C. Add this month's result to the running rollover total
+        rollover += (historical_limit - monthly_spend)
+        
+        # Move to the next month
+        iter_date = next_month_start
 
 # 3. CURRENT MONTH
 if not df.empty:
