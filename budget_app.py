@@ -37,7 +37,8 @@ st.markdown("""
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- DEFAULTS ---
-DEFAULT_ALLOWANCE = 1300.0  
+# 🚨 CRITICAL FIX: Set this to your OLD allowance (1250) so historical math is accurate
+DEFAULT_ALLOWANCE = 1250.0  
 FIXED_COSTS = 0.0  
 ADMIN_PASSWORD = "1234"  
 
@@ -165,6 +166,7 @@ if not full_df.empty:
         last_admin_row = admin_df.iloc[-1]
         CURRENT_ALLOWANCE = float(last_admin_row['Amount'])
     else:
+        # Fallback if no admin logs exist at all
         CURRENT_ALLOWANCE = DEFAULT_ALLOWANCE
 else:
     df = pd.DataFrame(columns=["Date", "Item", "Category", "Amount", "ID"])
@@ -176,7 +178,7 @@ today_dt = datetime.datetime.now(CASABLANCA_TZ)
 today = today_dt.date()
 
 # =========================================================
-# 2. ROLLOVER LOGIC (FIXED: Uses Historic Allowance)
+# 2. ROLLOVER LOGIC (Historical Allowance Fix)
 # =========================================================
 rollover = 0.0
 
@@ -191,23 +193,23 @@ if not df.empty:
     all_admin_logs = full_df[full_df['Category'] == 'ADMIN'].copy()
 
     while iter_date < current_month_start:
-        # Determine End of Month (Start of Next Month)
+        # Determine End of Month
         if iter_date.month == 12:
             next_month_start = datetime.date(iter_date.year + 1, 1, 1)
         else:
             next_month_start = datetime.date(iter_date.year, iter_date.month + 1, 1)
             
-        # A. Calculate Spend for this specific past month
+        # A. Calculate Spend for this past month
         month_mask = (df['Date'] >= pd.Timestamp(iter_date)) & (df['Date'] < pd.Timestamp(next_month_start))
         monthly_spend = df.loc[month_mask, "Amount"].sum()
         
-        # B. Find the allowance that was active DURING that month
-        # We look for the latest ADMIN entry that occurred BEFORE that month ended
+        # B. Find the allowance active DURING that month
         relevant_admin = all_admin_logs[all_admin_logs['Date'] < pd.Timestamp(next_month_start)]
         
         if not relevant_admin.empty:
             historical_limit = float(relevant_admin.sort_values('Date').iloc[-1]['Amount'])
         else:
+            # THIS IS THE KEY FIX: If no logs found, assume it was the OLD allowance (1250)
             historical_limit = DEFAULT_ALLOWANCE
             
         # C. Add savings/debt to rollover
@@ -224,7 +226,6 @@ else:
     current_month_spend = 0.0
 
 # 4. TOTALS
-# Use CURRENT_ALLOWANCE for this month, but 'rollover' contains the math from past allowances
 this_month_budget = (CURRENT_ALLOWANCE - FIXED_COSTS) + rollover
 current_balance = this_month_budget - current_month_spend
 
